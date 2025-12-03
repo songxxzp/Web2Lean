@@ -310,6 +310,9 @@ config.json
 Proposal.md
 Prompts.md
 
+# Trash
+trash
+
 # Markdown build artifacts
 *.html
 _site/
