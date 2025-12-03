@@ -2,7 +2,7 @@
 Math Stack Exchange爬虫主程序
 支持持久化运行、状态恢复、增量爬取
 """
-
+import random
 import requests
 import time
 import json
@@ -268,7 +268,7 @@ class MathSECrawler:
                 response.raise_for_status()
 
                 # 请求间隔
-                time.sleep(delay)
+                time.sleep(delay * (random.random() + 0.5))
 
                 return response.json() if response.headers.get('content-type', '').startswith('application/json') else response.text
 
