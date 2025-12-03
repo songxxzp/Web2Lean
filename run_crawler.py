@@ -7,6 +7,7 @@ import os
 import sys
 import time
 import subprocess
+import traceback
 import signal
 import json
 from datetime import datetime, timedelta
@@ -36,9 +37,13 @@ class CrawlerManager:
         Path(output_dir).mkdir(exist_ok=True)
 
         # 设置日志文件
-        log_file = self.config.get('log_file', 'crawler.log')
+        default_log_file_name = 'crawler.log'
+        log_file = self.config.get('log_file', default_log_file_name)
         if not os.path.isabs(log_file):
             log_file = os.path.join(output_dir, log_file)
+        if not os.path.exists(log_file):
+            log_file = os.path.join(output_dir, default_log_file_name)
+
         self.config.set('log_file', log_file)
 
         # 设置数据库文件
@@ -272,6 +277,7 @@ def main():
         print("\n用户中断操作")
     except Exception as e:
         print(f"操作失败: {e}")
+        traceback.print_exc()
 
 if __name__ == '__main__':
     main()
