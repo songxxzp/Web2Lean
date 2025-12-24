@@ -8,12 +8,20 @@
           <el-table-column prop="site_name" label="Name" width="150" />
           <el-table-column prop="site_type" label="Type" width="130" />
           <el-table-column prop="base_url" label="URL" show-overflow-tooltip />
-          <el-table-column label="Config" width="250">
+          <el-table-column label="Config" width="300">
             <template #default="{ row }">
               <span v-if="row.config_json">
-                Start: {{ getConfig(row, 'start_page') || 1 }},
-                Pages: {{ getConfig(row, 'pages_per_run') || 'N/A' }} |
-                Delay: {{ getConfig(row, 'request_delay') || 'N/A' }}s
+                <span v-if="getConfig(row, 'stop_strategy') === 'questions'">
+                  Stop: {{ getConfig(row, 'new_questions_limit') || 0 }} new questions
+                </span>
+                <span v-else>
+                  Stop: {{ getConfig(row, 'pages_per_run') || 'N/A' }} pages
+                </span>
+                <br>
+                <span style="color: #999; font-size: 12px;">
+                  Start: {{ getConfig(row, 'start_page') || 1 }} |
+                  Delay: {{ getConfig(row, 'request_delay') || 'N/A' }}s
+                </span>
               </span>
               <span v-else>-</span>
             </template>
@@ -86,32 +94,61 @@
     </el-tabs>
 
     <!-- Site Config Dialog -->
-    <el-dialog v-model="siteDialogVisible" title="Edit Site Configuration" width="500px">
-      <el-form :model="siteForm" label-width="140px">
+    <el-dialog v-model="siteDialogVisible" title="Edit Site Configuration" width="550px">
+      <el-form :model="siteForm" label-width="150px">
         <el-form-item label="Start Page">
           <el-input-number v-model="siteForm.start_page" :min="1" :max="10000" />
-          <span style="margin-left: 10px; color: #999;">Starting page number (default: 1)</span>
-        </el-form-item>
-        <el-form-item label="Pages Per Run">
-          <el-input-number v-model="siteForm.pages_per_run" :min="1" :max="100" />
-          <span style="margin-left: 10px; color: #999;">Number of pages to crawl</span>
-        </el-form-item>
-        <el-form-item label="Request Delay (s)">
-          <el-input-number v-model="siteForm.request_delay" :min="0" :max="60" :step="0.5" />
-          <span style="margin-left: 10px; color: #999;">Delay between API requests</span>
-        </el-form-item>
-        <el-form-item label="Max Retries">
-          <el-input-number v-model="siteForm.max_retries" :min="0" :max="10" />
-          <span style="margin-left: 10px; color: #999;">Retry attempts on failure</span>
+          <span style="margin-left: 10px; color: #999;">Starting page (default: 1)</span>
         </el-form-item>
 
-        <el-divider content-position="left">Usage Examples</el-divider>
-        <el-alert type="info" :closable="false" style="margin-bottom: 10px;">
-          <ul style="margin: 0; padding-left: 20px;">
-            <li><strong>Latest questions:</strong> Start=1, Pages=10 → Crawls pages 1-10</li>
-            <li><strong>Historical batch:</strong> Start=11, Pages=10 → Crawls pages 11-20</li>
-            <li><strong>Deep crawl:</strong> Start=1, Pages=100 → Crawls pages 1-100</li>
-          </ul>
+        <el-form-item label="Stop Strategy">
+          <el-select v-model="siteForm.stop_strategy" style="width: 200px">
+            <el-option label="By Pages (固定页数)" value="pages" />
+            <el-option label="By Questions (新问题数)" value="questions" />
+          </el-select>
+        </el-form-item>
+
+        <template v-if="siteForm.stop_strategy === 'pages'">
+          <el-form-item label="Pages Per Run">
+            <el-input-number v-model="siteForm.pages_per_run" :min="1" :max="1000" />
+            <span style="margin-left: 10px; color: #999;">Total pages to crawl</span>
+          </el-form-item>
+        </template>
+
+        <template v-if="siteForm.stop_strategy === 'questions'">
+          <el-form-item label="New Questions Limit">
+            <el-input-number v-model="siteForm.new_questions_limit" :min="0" :max="10000" />
+            <span style="margin-left: 10px; color: #999;">0 = unlimited</span>
+          </el-form-item>
+        </template>
+
+        <el-form-item label="Request Delay (s)">
+          <el-input-number v-model="siteForm.request_delay" :min="0" :max="60" :step="0.5" />
+          <span style="margin-left: 10px; color: #999;">Delay between requests</span>
+        </el-form-item>
+
+        <el-form-item label="Max Retries">
+          <el-input-number v-model="siteForm.max_retries" :min="0" :max="10" />
+          <span style="margin-left: 10px; color: #999;">Retry attempts</span>
+        </el-form-item>
+
+        <el-divider content-position="left">Strategy Examples</el-divider>
+        <el-alert type="info" :closable="false">
+          <template v-if="siteForm.stop_strategy === 'pages'">
+            <strong>By Pages:</strong> Crawls exactly {{ siteForm.pages_per_run }} pages
+            <ul style="margin: 10px 0; padding-left: 20px;">
+              <li>Start=1, Pages=10 → Crawls pages 1-10</li>
+              <li>Start=11, Pages=50 → Crawls pages 11-60</li>
+            </ul>
+          </template>
+          <template v-else>
+            <strong>By Questions:</strong> Crawls until {{ siteForm.new_questions_limit === 0 ? 'no more new questions' : siteForm.new_questions_limit + ' new questions found' }}
+            <ul style="margin: 10px 0; padding-left: 20px;">
+              <li>Start=1, Limit=0 → Crawls all pages (unlimited)</li>
+              <li>Start=1, Limit=100 → Stops after 100 new questions</li>
+              <li>Start=1, Limit=10 → Quickly fetches 10 new questions</li>
+            </ul>
+          </template>
         </el-alert>
       </el-form>
       <template #footer>
@@ -137,7 +174,9 @@ const siteDialogVisible = ref(false)
 const currentSite = ref(null)
 const siteForm = ref({
   start_page: 1,
+  stop_strategy: 'pages',
   pages_per_run: 10,
+  new_questions_limit: 0,
   request_delay: 8.0,
   max_retries: 3
 })
@@ -199,7 +238,9 @@ function editSite(site) {
   currentSite.value = site
   siteForm.value = {
     start_page: getConfig(site, 'start_page') || 1,
+    stop_strategy: getConfig(site, 'stop_strategy') || 'pages',
     pages_per_run: getConfig(site, 'pages_per_run') || 10,
+    new_questions_limit: getConfig(site, 'new_questions_limit') || 0,
     request_delay: getConfig(site, 'request_delay') || 8.0,
     max_retries: getConfig(site, 'max_retries') || 3
   }

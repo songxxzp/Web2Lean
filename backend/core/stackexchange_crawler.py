@@ -35,6 +35,10 @@ class StackExchangeCrawler(BaseCrawler):
         self.filter = '!9_bDDxJY5'
         # Starting page for crawling (default: 1)
         self.start_page = self.config.get('start_page', 1)
+        # Stop strategy: 'pages' (limit by pages_per_run) or 'questions' (limit by new_questions_count)
+        self.stop_strategy = self.config.get('stop_strategy', 'pages')
+        # New questions limit (0 = unlimited, only used when stop_strategy='questions')
+        self.new_questions_limit = self.config.get('new_questions_limit', 0)
 
     def fetch_questions_page(self, page: int, since: int = None) -> List[Dict[str, Any]]:
         """
@@ -300,10 +304,32 @@ class StackExchangeCrawler(BaseCrawler):
         new_questions_count = 0
         skipped_count = 0
 
-        # Process questions from start_page
-        for page in range(self.start_page, self.start_page + self.pages_per_run):
+        # Determine stop conditions based on strategy
+        if self.stop_strategy == 'questions':
+            # Stop when we reach new_questions_limit (or 0 = unlimited)
+            if self.new_questions_limit == 0:
+                print(f"Stop strategy: Crawl until no more new questions (unlimited)")
+                max_pages = 100000  # Effectively unlimited
+            else:
+                print(f"Stop strategy: Crawl until {self.new_questions_limit} new questions found")
+                max_pages = 100000  # Effectively unlimited
+        else:
+            # Default: stop after pages_per_run pages
+            print(f"Stop strategy: Crawl {self.pages_per_run} pages")
+            max_pages = self.pages_per_run
+
+        page = self.start_page
+
+        # Process questions
+        while page < self.start_page + max_pages:
             if self._stop_event.is_set():
                 break
+
+            # Check if we reached the new questions limit
+            if self.stop_strategy == 'questions' and self.new_questions_limit > 0:
+                if self.state.questions_crawled >= self.new_questions_limit:
+                    print(f"Reached new questions limit: {self.new_questions_limit}")
+                    break
 
             self.state.current_page = page
             questions_before = self.state.questions_crawled
@@ -334,14 +360,27 @@ class StackExchangeCrawler(BaseCrawler):
 
                         self._process_question(raw_q)
                         page_new_count += 1
+
+                        # Check if we reached the limit mid-page
+                        if self.stop_strategy == 'questions' and self.new_questions_limit > 0:
+                            if self.state.questions_crawled >= self.new_questions_limit:
+                                print(f"Reached new questions limit: {self.new_questions_limit}")
+                                break
                     except Exception as e:
                         print(f"Error processing question: {e}")
 
                 page_new_questions = self.state.questions_crawled - questions_before
-                print(f"Page {page} completed: {len(questions_data)} questions fetched, {page_new_questions} new, {len(questions_data) - page_new_questions} skipped")
+                progress_info = f"Page {page} completed: {len(questions_data)} fetched, {page_new_questions} new, {len(questions_data) - page_new_questions} skipped"
+
+                if self.stop_strategy == 'questions' and self.new_questions_limit > 0:
+                    progress_info += f" (Total new: {self.state.questions_crawled}/{self.new_questions_limit})"
+
+                print(progress_info)
+
+                page += 1
 
                 # Delay between pages
-                if page < self.start_page + self.pages_per_run - 1:
+                if page < self.start_page + max_pages:
                     time.sleep(self.request_delay)
 
             except Exception as e:
