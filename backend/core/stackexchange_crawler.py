@@ -33,13 +33,16 @@ class StackExchangeCrawler(BaseCrawler):
         # Use a valid filter that includes body and answers
         # Filter: !9_bDDxJY5 includes body, answers, comments
         self.filter = '!9_bDDxJY5'
+        # Starting page for crawling (default: 1)
+        self.start_page = self.config.get('start_page', 1)
 
-    def fetch_questions_page(self, page: int) -> List[Dict[str, Any]]:
+    def fetch_questions_page(self, page: int, since: int = None) -> List[Dict[str, Any]]:
         """
         Fetch a page of questions from StackExchange API.
 
         Args:
             page: Page number (1-indexed)
+            since: Optional Unix timestamp to fetch only questions newer than this
 
         Returns:
             List of raw question data from API
@@ -53,6 +56,10 @@ class StackExchangeCrawler(BaseCrawler):
             'filter': self.filter,
             'site': self.site_param
         }
+
+        # Add since parameter for incremental crawling
+        if since:
+            params['since'] = since
 
         # Add key if available
         if self.api_key:
@@ -163,37 +170,41 @@ class StackExchangeCrawler(BaseCrawler):
         # Remove raw_answers from question dict
         question.pop('raw_answers', None)
 
-        # Save question
+        # Save question (now returns tuple of id, is_new)
         question['site_id'] = self.site_id
-        q_id = self.db.save_question(question)
-        self.state.questions_crawled += 1
+        q_id, is_new = self.db.save_question(question)
 
-        # Save answers
-        session = self.db.get_session()
-        try:
-            from backend.database.schema import Answer
+        # Only count if it's a new question
+        if is_new:
+            self.state.questions_crawled += 1
 
-            for ans_data in answers_data:
-                ans_data['question_id'] = q_id
-                ans_data['site_id'] = self.site_id
+        # Save answers (only if question is new to avoid redundant processing)
+        if is_new:
+            session = self.db.get_session()
+            try:
+                from backend.database.schema import Answer
 
-                # Check if answer exists
-                existing = session.query(Answer).filter(
-                    Answer.answer_id == ans_data['answer_id'],
-                    Answer.site_id == self.site_id
-                ).first()
+                for ans_data in answers_data:
+                    ans_data['question_id'] = q_id
+                    ans_data['site_id'] = self.site_id
 
-                if not existing:
-                    answer = Answer(**ans_data)
-                    session.add(answer)
-                    self.state.answers_crawled += 1
+                    # Check if answer exists
+                    existing = session.query(Answer).filter(
+                        Answer.answer_id == ans_data['answer_id'],
+                        Answer.site_id == self.site_id
+                    ).first()
 
-            session.commit()
-        except Exception as e:
-            session.rollback()
-            print(f"Error saving answers: {e}")
-        finally:
-            session.close()
+                    if not existing:
+                        answer = Answer(**ans_data)
+                        session.add(answer)
+                        self.state.answers_crawled += 1
+
+                session.commit()
+            except Exception as e:
+                session.rollback()
+                print(f"Error saving answers: {e}")
+            finally:
+                session.close()
 
     def _strip_html(self, html_content: str) -> str:
         """
@@ -283,22 +294,24 @@ class StackExchangeCrawler(BaseCrawler):
         Internal method to run the crawl.
 
         Args:
-            mode: Crawl mode
+            mode: Crawl mode ('incremental' or 'history')
             **kwargs: Additional parameters
         """
-        start_page = 1  # StackExchange API uses 1-indexed pages
+        new_questions_count = 0
+        skipped_count = 0
 
-        # Process questions
-        for page in range(start_page, start_page + self.pages_per_run):
+        # Process questions from start_page
+        for page in range(self.start_page, self.start_page + self.pages_per_run):
             if self._stop_event.is_set():
                 break
 
             self.state.current_page = page
+            questions_before = self.state.questions_crawled
 
             try:
                 # Fetch questions
                 questions_data = self._fetch_with_retry(
-                    lambda: self.fetch_questions_page(page)
+                    lambda: self.fetch_questions_page(page, since=None)
                 )
 
                 if not questions_data:
@@ -306,25 +319,37 @@ class StackExchangeCrawler(BaseCrawler):
                     break
 
                 # Process each question
+                page_new_count = 0
                 for raw_q in questions_data:
                     if self._stop_event.is_set():
                         break
 
                     try:
+                        qid = raw_q.get('question_id')
+
+                        # Check if question exists (for all modes to avoid duplicates)
+                        if self.db.question_exists(qid, self.site_id):
+                            skipped_count += 1
+                            continue
+
                         self._process_question(raw_q)
+                        page_new_count += 1
                     except Exception as e:
                         print(f"Error processing question: {e}")
 
-                print(f"Page {page} completed: {len(questions_data)} questions")
+                page_new_questions = self.state.questions_crawled - questions_before
+                print(f"Page {page} completed: {len(questions_data)} questions fetched, {page_new_questions} new, {len(questions_data) - page_new_questions} skipped")
 
                 # Delay between pages
-                if page < start_page + self.pages_per_run - 1:
+                if page < self.start_page + self.pages_per_run - 1:
                     time.sleep(self.request_delay)
 
             except Exception as e:
                 print(f"Error fetching page {page}: {e}")
                 if self.max_retries <= 1:
                     break
+
+        print(f"Crawl completed: {self.state.questions_crawled} new questions, {skipped_count} existing questions skipped")
 
 
 # Convenience wrappers for specific sites

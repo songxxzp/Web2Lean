@@ -158,8 +158,13 @@ class DatabaseManager:
 
     # ===== Question Management =====
 
-    def save_question(self, question_data: Dict[str, Any]) -> int:
-        """Save or update a question. Returns question internal ID."""
+    def save_question(self, question_data: Dict[str, Any]) -> tuple[int, bool]:
+        """
+        Save or update a question.
+
+        Returns:
+            Tuple of (question_internal_id, is_new)
+        """
         session = self.get_session()
         try:
             # Check if question exists
@@ -169,12 +174,14 @@ class DatabaseManager:
             ).first()
 
             if existing:
-                # Update existing
-                for key, value in question_data.items():
+                # Update existing - don't update crawled_at to track original crawl time
+                question_data_copy = question_data.copy()
+                question_data_copy.pop('crawled_at', None)  # Don't update crawl time
+                for key, value in question_data_copy.items():
                     if hasattr(existing, key):
                         setattr(existing, key, value)
                 session.commit()
-                return existing.id
+                return existing.id, False
             else:
                 # Create new
                 question = Question(**question_data)
@@ -191,10 +198,45 @@ class DatabaseManager:
                 session.add(status)
                 session.commit()
 
-                return question.id
+                return question.id, True
         except Exception as e:
             session.rollback()
             raise e
+        finally:
+            session.close()
+
+    def question_exists(self, question_id: int, site_id: int) -> bool:
+        """Check if a question already exists."""
+        session = self.get_session()
+        try:
+            return session.query(Question).filter(
+                Question.question_id == question_id,
+                Question.site_id == site_id
+            ).first() is not None
+        finally:
+            session.close()
+
+    def get_last_crawl_time(self, site_id: int) -> Optional[int]:
+        """
+        Get the timestamp of the most recent question for a site.
+
+        Returns:
+            Unix timestamp or None if no questions exist
+        """
+        session = self.get_session()
+        try:
+            # Get the most recent question by creation_date
+            result = session.query(Question).filter(
+                Question.site_id == site_id
+            ).order_by(Question.creation_date.desc()).first()
+
+            if result and result.creation_date:
+                try:
+                    return int(result.creation_date)
+                except (ValueError, TypeError):
+                    # If creation_date is not a timestamp, return None
+                    return None
+            return None
         finally:
             session.close()
 

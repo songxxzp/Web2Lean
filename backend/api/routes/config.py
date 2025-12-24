@@ -2,6 +2,7 @@
 Configuration API endpoints.
 """
 from flask import Blueprint, request, jsonify, current_app
+import json
 
 config_bp = Blueprint('config', __name__)
 
@@ -15,6 +16,46 @@ def get_sites():
     db = current_app.config['db']
     sites = db.get_sites()
     return jsonify(sites)
+
+
+@config_bp.route('/sites/<int:site_id>', methods=['PUT', 'OPTIONS'])
+def update_site(site_id):
+    """Update a site configuration."""
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    data = request.get_json()
+    db = current_app.config['db']
+
+    session = db.get_session()
+    try:
+        from backend.database.schema import Site
+
+        site = session.query(Site).filter(Site.site_id == site_id).first()
+        if not site:
+            return jsonify({'error': 'Site not found'}), 404
+
+        # Update allowed fields
+        if 'enabled' in data:
+            site.enabled = data['enabled']
+        if 'config' in data:
+            # Merge config with existing config
+            existing_config = {}
+            if site.config_json:
+                try:
+                    existing_config = json.loads(site.config_json)
+                except:
+                    pass
+            existing_config.update(data['config'])
+            site.config_json = json.dumps(existing_config)
+
+        session.commit()
+        return jsonify({'message': 'Site updated successfully'})
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
 
 
 @config_bp.route('/prompts', methods=['GET', 'OPTIONS'])

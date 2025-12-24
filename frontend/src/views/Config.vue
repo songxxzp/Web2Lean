@@ -4,15 +4,28 @@
 
     <el-tabs v-model="activeTab">
       <el-tab-pane label="Sites" name="sites">
-        <el-button type="primary" @click="showAddSiteDialog">Add Site</el-button>
-
         <el-table :data="sites" stripe style="margin-top: 1rem">
-          <el-table-column prop="site_name" label="Name" />
-          <el-table-column prop="site_type" label="Type" />
+          <el-table-column prop="site_name" label="Name" width="150" />
+          <el-table-column prop="site_type" label="Type" width="130" />
           <el-table-column prop="base_url" label="URL" show-overflow-tooltip />
-          <el-table-column label="Enabled">
+          <el-table-column label="Config" width="250">
+            <template #default="{ row }">
+              <span v-if="row.config_json">
+                Start: {{ getConfig(row, 'start_page') || 1 }},
+                Pages: {{ getConfig(row, 'pages_per_run') || 'N/A' }} |
+                Delay: {{ getConfig(row, 'request_delay') || 'N/A' }}s
+              </span>
+              <span v-else>-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="Enabled" width="100">
             <template #default="{ row }">
               <el-switch v-model="row.enabled" @change="toggleSite(row)" />
+            </template>
+          </el-table-column>
+          <el-table-column label="Actions" width="100">
+            <template #default="{ row }">
+              <el-button size="small" @click="editSite(row)">Edit</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -70,26 +83,42 @@
           </el-table-column>
         </el-table>
       </el-tab-pane>
-
-      <el-tab-pane label="API Settings" name="api">
-        <el-alert
-          title="Zhipu API Key"
-          type="info"
-          :description="apiKeyMasked"
-          show-icon
-          style="margin-bottom: 1rem"
-        />
-
-        <el-form label-width="200px">
-          <el-form-item label="VLLM Base URL">
-            <el-input v-model="apiSettings.vllm_base_url" />
-          </el-form-item>
-          <el-form-item label="VLLM Model Path">
-            <el-input v-model="apiSettings.vllm_model_path" />
-          </el-form-item>
-        </el-form>
-      </el-tab-pane>
     </el-tabs>
+
+    <!-- Site Config Dialog -->
+    <el-dialog v-model="siteDialogVisible" title="Edit Site Configuration" width="500px">
+      <el-form :model="siteForm" label-width="140px">
+        <el-form-item label="Start Page">
+          <el-input-number v-model="siteForm.start_page" :min="1" :max="10000" />
+          <span style="margin-left: 10px; color: #999;">Starting page number (default: 1)</span>
+        </el-form-item>
+        <el-form-item label="Pages Per Run">
+          <el-input-number v-model="siteForm.pages_per_run" :min="1" :max="100" />
+          <span style="margin-left: 10px; color: #999;">Number of pages to crawl</span>
+        </el-form-item>
+        <el-form-item label="Request Delay (s)">
+          <el-input-number v-model="siteForm.request_delay" :min="0" :max="60" :step="0.5" />
+          <span style="margin-left: 10px; color: #999;">Delay between API requests</span>
+        </el-form-item>
+        <el-form-item label="Max Retries">
+          <el-input-number v-model="siteForm.max_retries" :min="0" :max="10" />
+          <span style="margin-left: 10px; color: #999;">Retry attempts on failure</span>
+        </el-form-item>
+
+        <el-divider content-position="left">Usage Examples</el-divider>
+        <el-alert type="info" :closable="false" style="margin-bottom: 10px;">
+          <ul style="margin: 0; padding-left: 20px;">
+            <li><strong>Latest questions:</strong> Start=1, Pages=10 → Crawls pages 1-10</li>
+            <li><strong>Historical batch:</strong> Start=11, Pages=10 → Crawls pages 11-20</li>
+            <li><strong>Deep crawl:</strong> Start=1, Pages=100 → Crawls pages 1-100</li>
+          </ul>
+        </el-alert>
+      </el-form>
+      <template #footer>
+        <el-button @click="siteDialogVisible = false">Cancel</el-button>
+        <el-button type="primary" @click="saveSiteConfig">Save</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -102,10 +131,15 @@ const activeTab = ref('sites')
 const sites = ref([])
 const prompts = ref({})
 const schedules = ref([])
-const apiKeyMasked = ref('Set ZHIPU_API_KEY environment variable')
-const apiSettings = ref({
-  vllm_base_url: 'http://localhost:8000/v1',
-  vllm_model_path: '/root/Kimina-Autoformalizer-7B'
+
+// Site config dialog
+const siteDialogVisible = ref(false)
+const currentSite = ref(null)
+const siteForm = ref({
+  start_page: 1,
+  pages_per_run: 10,
+  request_delay: 8.0,
+  max_retries: 3
 })
 
 async function loadSites() {
@@ -150,6 +184,41 @@ async function toggleSite(site) {
   }
 }
 
+function getConfig(site, key) {
+  try {
+    const config = typeof site.config_json === 'string'
+      ? JSON.parse(site.config_json)
+      : site.config_json
+    return config?.[key]
+  } catch {
+    return null
+  }
+}
+
+function editSite(site) {
+  currentSite.value = site
+  siteForm.value = {
+    start_page: getConfig(site, 'start_page') || 1,
+    pages_per_run: getConfig(site, 'pages_per_run') || 10,
+    request_delay: getConfig(site, 'request_delay') || 8.0,
+    max_retries: getConfig(site, 'max_retries') || 3
+  }
+  siteDialogVisible.value = true
+}
+
+async function saveSiteConfig() {
+  try {
+    await configApi.updateSite(currentSite.value.site_id, {
+      config: siteForm.value
+    })
+    ElMessage.success('Site configuration saved')
+    siteDialogVisible.value = false
+    await loadSites()
+  } catch (error) {
+    ElMessage.error('Failed to save site configuration')
+  }
+}
+
 async function deleteSchedule(taskId) {
   try {
     await configApi.deleteSchedule(taskId)
@@ -158,10 +227,6 @@ async function deleteSchedule(taskId) {
   } catch (error) {
     ElMessage.error('Failed to delete schedule')
   }
-}
-
-function showAddSiteDialog() {
-  ElMessage.info('Add site feature - implement as needed')
 }
 
 function showAddScheduleDialog() {
