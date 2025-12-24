@@ -1,6 +1,27 @@
-requests>=2.31.0
-beautifulsoup4>=4.12.0
-lxml>=4.9.0
-python-dateutil>=2.8.0
-tqdm>=4.65.0
-schedule>=1.2.0
+# Web2Lean Requirements
+
+# Web Framework
+Flask==3.0.0
+Flask-CORS==4.0.0
+
+# Database
+SQLAlchemy==2.0.23
+
+# HTTP & API
+requests==2.31.0
+
+# HTML Parsing
+beautifulsoup4==4.12.2
+lxml==5.1.0
+
+# Image Processing
+Pillow==10.1.0
+
+# Task Scheduling
+APScheduler==3.10.4
+
+# Data Validation
+pydantic==2.5.2
+
+# Utilities
+python-dotenv==1.0.0

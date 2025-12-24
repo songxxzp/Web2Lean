@@ -178,6 +178,7 @@ cython_debug/
 
 # Project-specific data and outputs
 math_se_data/
+math_server_data/
 *.db
 *.sqlite
 *.sqlite3
@@ -311,7 +312,18 @@ Proposal.md
 Prompts.md
 
 # Trash
-trash
+trash/
+
+# Logs
+logs/
+*.log
+*.pid
+
+# Installation scripts
+claude_code_env.sh
+
+# Status files (development only)
+STATUS.md
 
 # Markdown build artifacts
 *.html

@@ -1,0 +1,21 @@
+{
+  "base_url": "https://math.stackexchange.com",
+  "api_base": "https://api.stackexchange.com/2.3",
+  "output_dir": "math_server_data",
+  "state_file": "crawler_state.json",
+  "log_file": "math_server_data/crawler.log",
+  "max_pages_per_run": 6,
+  "request_delay": 8.0,
+  "max_retries": 2,
+  "timeout": 60,
+  "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "api_key": null,
+  "questions_per_page": 50,
+  "max_age_days": 365,
+  "tags": [],
+  "min_score": 0,
+  "exclude_closed": false,
+  "proxy": null,
+  "concurrent_requests": 1,
+  "db_path": "math_server_data/math_se_questions.db"
+}
