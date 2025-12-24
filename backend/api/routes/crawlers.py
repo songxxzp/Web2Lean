@@ -10,6 +10,35 @@ crawlers_bp = Blueprint('crawlers', __name__)
 _active_crawlers = {}
 
 
+# Crawler class registry
+CRAWLER_CLASSES = {
+    'math_se': '...core.math_se_crawler.MathSECrawler',
+    'mathoverflow': '...core.stackexchange_crawler.MathOverflowCrawler',
+    'math_stackexchange': '...core.stackexchange_crawler.MathSECrawler',
+}
+
+
+def get_crawler_class(site_type):
+    """
+    Get the appropriate crawler class for a site type.
+
+    Args:
+        site_type: Site type identifier
+
+    Returns:
+        Crawler class
+    """
+    # Try direct import
+    if site_type == 'mathoverflow':
+        from ...core.stackexchange_crawler import MathOverflowCrawler
+        return MathOverflowCrawler
+    elif site_type in ('math_se', 'math_stackexchange'):
+        from ...core.stackexchange_crawler import MathSECrawler
+        return MathSECrawler
+    else:
+        raise ValueError(f"No crawler implemented for site type: {site_type}")
+
+
 @crawlers_bp.route('/start', methods=['POST', 'OPTIONS'])
 def start_crawler():
     """Start a crawler for a specific site."""
@@ -42,7 +71,9 @@ def start_crawler():
 
     # Create and start crawler
     try:
-        from ...core.math_se_crawler import MathSECrawler
+        # Get appropriate crawler class
+        site_type = site.get('site_type')
+        CrawlerClass = get_crawler_class(site_type)
 
         # Get config from config_json
         import json
@@ -56,7 +87,7 @@ def start_crawler():
         config['base_url'] = site.get('base_url') or config.get('base_url')
         config['site_type'] = site.get('site_type')
 
-        crawler = MathSECrawler(
+        crawler = CrawlerClass(
             site_name=site_name,
             site_id=site['site_id'],
             config=config,
