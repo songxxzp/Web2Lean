@@ -93,8 +93,13 @@ export const processingApi = {
  */
 export const databaseApi = {
   listQuestions: (params = {}) => {
-    const query = new URLSearchParams(params).toString()
-    return apiRequest(`/database/questions?${query}`)
+    // Filter out null/undefined values
+    const cleanParams = Object.fromEntries(
+      Object.entries(params).filter(([_, v]) => v != null)
+    )
+    const query = new URLSearchParams(cleanParams).toString()
+    const url = query ? `/database/questions?${query}` : '/database/questions'
+    return apiRequest(url)
   },
 
   getQuestion: (questionId) =>
