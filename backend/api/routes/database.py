@@ -18,7 +18,7 @@ def list_questions():
     offset = request.args.get('offset', 0, type=int)
 
     db = current_app.config['db']
-    questions = db.list_questions(
+    result = db.list_questions(
         site_id=site_id,
         status=status,
         limit=limit,
@@ -26,8 +26,8 @@ def list_questions():
     )
 
     return jsonify({
-        'questions': questions,
-        'count': len(questions),
+        'questions': result['questions'],
+        'count': result['total'],
         'limit': limit,
         'offset': offset
     })

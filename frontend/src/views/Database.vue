@@ -45,7 +45,7 @@
       v-model:page-size="pagination.pageSize"
       :total="pagination.total"
       layout="total, prev, pager, next"
-      @current-change="loadQuestions"
+      @current-change="handlePageChange"
     />
 
     <!-- Question Detail Dialog -->
@@ -128,6 +128,11 @@ async function loadQuestions() {
   } catch (error) {
     ElMessage.error('Failed to load questions')
   }
+}
+
+function handlePageChange(newPage) {
+  pagination.value.page = newPage
+  loadQuestions()
 }
 
 function showDetail(row) {

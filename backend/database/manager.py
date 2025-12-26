@@ -301,24 +301,29 @@ class DatabaseManager:
 
     def list_questions(self, site_id: Optional[int] = None,
                       status: Optional[str] = None,
-                      limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
-        """List questions with optional filters."""
+                      limit: int = 100, offset: int = 0) -> Dict[str, Any]:
+        """List questions with optional filters. Returns dict with questions and total count."""
         session = self.get_session()
         try:
-            query = session.query(Question, ProcessingStatus).outerjoin(
+            # Build base query
+            base_query = session.query(Question, ProcessingStatus).outerjoin(
                 ProcessingStatus,
                 Question.id == ProcessingStatus.question_id
             )
 
             if site_id is not None:
-                query = query.filter(Question.site_id == site_id)
+                base_query = base_query.filter(Question.site_id == site_id)
             if status is not None:
-                query = query.filter(ProcessingStatus.status == status)
+                base_query = base_query.filter(ProcessingStatus.status == status)
 
-            query = query.order_by(Question.id.desc()).offset(offset).limit(limit)
+            # Get total count
+            total = base_query.count()
+
+            # Get paginated results
+            query = base_query.order_by(Question.id.desc()).offset(offset).limit(limit)
             results = query.all()
 
-            return [
+            questions = [
                 {
                     'id': q.id,
                     'question_id': q.question_id,
@@ -331,6 +336,11 @@ class DatabaseManager:
                 }
                 for q, ps in results
             ]
+
+            return {
+                'questions': questions,
+                'total': total
+            }
         finally:
             session.close()
 
