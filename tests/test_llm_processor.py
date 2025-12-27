@@ -34,14 +34,17 @@ class TestJSONEscapeFixing:
         client = ZhipuClient(api_key="test_key")
 
         # This simulates a response with LaTeX escapes
+        # Use raw string to avoid Python interpreting backslashes
+        content = r'''{
+  "is_valid_question": true,
+  "corrected_question": "Test $\frac{1}{2}$ with \\mathbb{R}",
+  "corrected_answer": "Answer with \(x^2\)"
+}'''
+
         mock_response = {
             "choices": [{
                 "message": {
-                    "content": '''{
-  "is_valid_question": true,
-  "corrected_question": "Test $\\frac{1}{2}$ with \\\\mathbb{R}",
-  "corrected_answer": "Answer with \\(x^2\\)"
-}'''
+                    "content": content
                 }
             }]
         }
@@ -50,7 +53,7 @@ class TestJSONEscapeFixing:
             result = client.correct_content(question="Test", answer="Test")
             assert result['is_valid_question'] == True
             # LaTeX should be preserved (with double backslashes after JSON encoding/decoding)
-            assert 'frac' in result['corrected_question']
+            assert 'mathbb' in result['corrected_question']
 
     def test_fix_json_escapes_invalid_sequences(self):
         """Test that invalid escape sequences are handled."""
@@ -87,13 +90,13 @@ class TestZhipuClient:
         client = ZhipuClient(api_key="test_key_123")
         assert client.api_key == "test_key_123"
 
-    @patch('backend.utils.llm_client.requests.post')
-    def test_correct_content_success(self, mock_post):
+    @patch('backend.utils.llm_client.ZhipuAiClient')
+    def test_correct_content_success(self, mock_sdk):
         """Test successful content correction."""
-        mock_post.return_value.json.return_value = {
-            "choices": [{
-                "message": {
-                    "content": '''{
+        # Mock the SDK response
+        mock_completion = MagicMock()
+        mock_completion.choices = [MagicMock()]
+        mock_completion.choices[0].message.content = '''{
   "is_valid_question": true,
   "is_valid_answer": true,
   "has_errors": false,
@@ -103,9 +106,15 @@ class TestZhipuClient:
   "correction_notes": "Question is clear.",
   "worth_formalizing": true
 }'''
-                }
-            }]
-        }
+        mock_completion.choices[0].message.role = "assistant"
+        mock_completion.choices[0].finish_reason = "stop"
+        mock_completion.usage.prompt_tokens = 10
+        mock_completion.usage.completion_tokens = 20
+        mock_completion.usage.total_tokens = 30
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.chat.completions.create.return_value = mock_completion
+        mock_sdk.return_value = mock_client_instance
 
         client = ZhipuClient(api_key="test_key")
         result = client.correct_content(
@@ -117,16 +126,21 @@ class TestZhipuClient:
         assert result['corrected_question'] == "What is 2+2?"
         assert result['has_errors'] == False
 
-    @patch('backend.utils.llm_client.requests.post')
-    def test_correct_content_with_html_entities(self, mock_post):
+    @patch('backend.utils.llm_client.ZhipuAiClient')
+    def test_correct_content_with_html_entities(self, mock_sdk):
         """Test handling of HTML entities in response."""
-        mock_post.return_value.json.return_value = {
-            "choices": [{
-                "message": {
-                    "content": '{"test": "a &gt; b", "valid": true}'
-                }
-            }]
-        }
+        mock_completion = MagicMock()
+        mock_completion.choices = [MagicMock()]
+        mock_completion.choices[0].message.content = '{"test": "a &gt; b", "valid": true}'
+        mock_completion.choices[0].message.role = "assistant"
+        mock_completion.choices[0].finish_reason = "stop"
+        mock_completion.usage.prompt_tokens = 5
+        mock_completion.usage.completion_tokens = 10
+        mock_completion.usage.total_tokens = 15
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.chat.completions.create.return_value = mock_completion
+        mock_sdk.return_value = mock_client_instance
 
         client = ZhipuClient(api_key="test_key")
         result = client.correct_content(
@@ -137,13 +151,12 @@ class TestZhipuClient:
         # HTML entity should be decoded
         assert 'a > b' in result['test']
 
-    @patch('backend.utils.llm_client.requests.post')
-    def test_correct_content_with_extra_text(self, mock_post):
+    @patch('backend.utils.llm_client.ZhipuAiClient')
+    def test_correct_content_with_extra_text(self, mock_sdk):
         """Test handling of extra text after JSON."""
-        mock_post.return_value.json.return_value = {
-            "choices": [{
-                "message": {
-                    "content": '''Here's the analysis:
+        mock_completion = MagicMock()
+        mock_completion.choices = [MagicMock()]
+        mock_completion.choices[0].message.content = '''Here's the analysis:
 
 {
   "is_valid_question": true,
@@ -151,25 +164,36 @@ class TestZhipuClient:
 }
 
 Additional notes: The question looks good.'''
-                }
-            }]
-        }
+        mock_completion.choices[0].message.role = "assistant"
+        mock_completion.choices[0].finish_reason = "stop"
+        mock_completion.usage.prompt_tokens = 10
+        mock_completion.usage.completion_tokens = 15
+        mock_completion.usage.total_tokens = 25
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.chat.completions.create.return_value = mock_completion
+        mock_sdk.return_value = mock_client_instance
 
         client = ZhipuClient(api_key="test_key")
         result = client.correct_content(question="Test", answer="Answer")
 
         assert result['is_valid_question'] == True
 
-    @patch('backend.utils.llm_client.requests.post')
-    def test_correct_content_invalid_json_raises_error(self, mock_post):
+    @patch('backend.utils.llm_client.ZhipuAiClient')
+    def test_correct_content_invalid_json_raises_error(self, mock_sdk):
         """Test that invalid JSON raises an error."""
-        mock_post.return_value.json.return_value = {
-            "choices": [{
-                "message": {
-                    "content": "This is not JSON at all"
-                }
-            }]
-        }
+        mock_completion = MagicMock()
+        mock_completion.choices = [MagicMock()]
+        mock_completion.choices[0].message.content = "This is not JSON at all"
+        mock_completion.choices[0].message.role = "assistant"
+        mock_completion.choices[0].finish_reason = "stop"
+        mock_completion.usage.prompt_tokens = 5
+        mock_completion.usage.completion_tokens = 10
+        mock_completion.usage.total_tokens = 15
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.chat.completions.create.return_value = mock_completion
+        mock_sdk.return_value = mock_client_instance
 
         client = ZhipuClient(api_key="test_key")
 
