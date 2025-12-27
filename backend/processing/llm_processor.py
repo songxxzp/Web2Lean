@@ -146,7 +146,7 @@ class LLMProcessor:
                     question_internal_id,
                     status='failed',
                     current_stage='llm_correction',
-                    lean_error=f"Program error: {error_msg}",
+                    preprocessing_error=f"Preprocessing program error: {error_msg}",
                     processing_completed_at=self._now()
                 )
                 raise
@@ -156,6 +156,7 @@ class LLMProcessor:
                 self.db.update_processing_status(
                     question_internal_id,
                     status='cant_convert',
+                    preprocessing_error=f"Content validation error: {error_msg}",
                     correction_notes=f"Content validation error: {error_msg}",
                     processing_completed_at=self._now()
                 )

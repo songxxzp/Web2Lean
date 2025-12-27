@@ -277,7 +277,10 @@ class DatabaseManager:
                     'preprocessed_body': ps.preprocessed_body if ps else None,
                     'preprocessed_answer': ps.preprocessed_answer if ps else None,
                     'correction_notes': ps.correction_notes if ps else None,
-                    'lean_code': ps.lean_code if ps else None,
+                    'preprocessing_error': ps.preprocessing_error if ps else None,
+                    'question_lean_code': ps.question_lean_code if ps else None,
+                    'answer_lean_code': ps.answer_lean_code if ps else None,
+                    'lean_code': ps.lean_code if ps else None,  # Deprecated, for backward compatibility
                     'lean_error': ps.lean_error if ps else None,
                 } if ps else None,
                 'images': [

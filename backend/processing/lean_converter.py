@@ -71,20 +71,24 @@ class LeanConverter:
             if answer:
                 answer_lean = self._convert_answer_to_lean(answer)
 
-            # Combine question and answer Lean code
+            # Combine question and answer Lean code (for backward compatibility)
             combined_lean = self._combine_lean_code(question_lean, answer_lean)
 
-            # Update processing status
+            # Update processing status - store separately
             self.db.update_processing_status(
                 question_internal_id,
                 status='lean_converted',
-                lean_code=combined_lean,
+                question_lean_code=question_lean,
+                answer_lean_code=answer_lean,
+                lean_code=combined_lean,  # Keep for backward compatibility
                 processing_completed_at=self._now()
             )
 
             return {
                 'success': True,
-                'lean_code': combined_lean,
+                'question_lean_code': question_lean,
+                'answer_lean_code': answer_lean,
+                'lean_code': combined_lean,  # For backward compatibility
                 'has_answer': answer_lean is not None
             }
 

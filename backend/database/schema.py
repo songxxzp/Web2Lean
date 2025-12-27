@@ -130,7 +130,10 @@ class ProcessingStatus(Base):
     preprocessed_body = Column(Text)
     preprocessed_answer = Column(Text)
     correction_notes = Column(Text)
-    lean_code = Column(Text)
+    preprocessing_error = Column(Text)  # Error message if preprocessing failed
+    question_lean_code = Column(Text)  # Lean code for question (theorem/definition)
+    answer_lean_code = Column(Text)  # Lean code for answer (proof)
+    lean_code = Column(Text)  # Deprecated - kept for backward compatibility
     lean_error = Column(Text)
     processing_started_at = Column(Text)
     processing_completed_at = Column(Text)

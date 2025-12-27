@@ -167,7 +167,23 @@
 
           <!-- Preprocessed Content -->
           <el-tab-pane label="Preprocessed" name="preprocessed">
-            <div v-if="selectedQuestion.processing_status?.preprocessed_body">
+            <!-- Show error if preprocessing failed -->
+            <div v-if="selectedQuestion.processing_status?.preprocessing_error">
+              <el-alert type="error" :closable="false">
+                <strong>Preprocessing Failed:</strong>
+                <div style="margin-top: 0.5rem; white-space: pre-wrap;">{{ selectedQuestion.processing_status.preprocessing_error }}</div>
+              </el-alert>
+
+              <div v-if="selectedQuestion.processing_status?.correction_notes" style="margin-top: 1rem;">
+                <el-alert type="warning" :closable="false">
+                  <strong>Details:</strong>
+                  <div style="margin-top: 0.5rem; white-space: pre-wrap;">{{ selectedQuestion.processing_status.correction_notes }}</div>
+                </el-alert>
+              </div>
+            </div>
+
+            <!-- Show preprocessed content if available -->
+            <div v-else-if="selectedQuestion.processing_status?.preprocessed_body">
               <h4>Preprocessed Question</h4>
               <div class="content">{{ selectedQuestion.processing_status.preprocessed_body }}</div>
 
@@ -183,17 +199,39 @@
                 </el-alert>
               </div>
             </div>
+
+            <!-- Not processed yet -->
             <div v-else class="content">Not processed yet</div>
           </el-tab-pane>
 
           <!-- Lean Code -->
           <el-tab-pane label="Lean Code" name="lean">
-            <div v-if="selectedQuestion.processing_status?.lean_code">
-              <h4>Lean Formalization</h4>
-              <pre class="code">{{ selectedQuestion.processing_status.lean_code }}</pre>
+            <!-- Show Lean code split into question and answer -->
+            <div v-if="selectedQuestion.processing_status?.question_lean_code || selectedQuestion.processing_status?.lean_code">
+              <!-- Question Lean Code -->
+              <div v-if="selectedQuestion.processing_status?.question_lean_code">
+                <h4>Question (Theorem/Definition)</h4>
+                <pre class="code">{{ selectedQuestion.processing_status.question_lean_code }}</pre>
+              </div>
+
+              <!-- Answer Lean Code -->
+              <div v-if="selectedQuestion.processing_status?.answer_lean_code">
+                <el-divider style="margin: 1.5rem 0;" />
+                <h4>Answer (Proof)</h4>
+                <pre class="code">{{ selectedQuestion.processing_status.answer_lean_code }}</pre>
+              </div>
+
+              <!-- Fallback: Show combined lean_code if separate fields don't exist -->
+              <div v-if="!selectedQuestion.processing_status?.question_lean_code && selectedQuestion.processing_status?.lean_code">
+                <h4>Lean Formalization</h4>
+                <pre class="code">{{ selectedQuestion.processing_status.lean_code }}</pre>
+              </div>
             </div>
+
+            <!-- Not converted yet -->
             <div v-else class="content">Not converted yet</div>
 
+            <!-- Conversion Error -->
             <div v-if="selectedQuestion.processing_status?.lean_error" style="margin-top: 1rem;">
               <el-alert type="error" :closable="false">
                 <strong>Conversion Error:</strong>
