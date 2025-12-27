@@ -21,6 +21,11 @@ class Settings:
     vllm_base_url: str = 'http://localhost:8000/v1'
     vllm_model_path: str = '/root/Kimina-Autoformalizer-7B'
 
+    # LLM Models
+    glm_text_model: str = 'glm-4.7'  # For text processing (new zai-sdk)
+    glm_vision_model: str = 'glm-4.6v'  # For image OCR (new zai-sdk)
+    glm_lean_model: str = ''  # Empty means use local Kimina by default
+
     # Crawler defaults
     default_pages_per_run: int = 10
     default_request_delay: float = 8.0
@@ -65,6 +70,9 @@ class Settings:
         self.zhipu_api_key = os.getenv('ZHIPU_API_KEY', self.zhipu_api_key)
         self.api_port = int(os.getenv('API_PORT', self.api_port))
         self.api_debug = os.getenv('API_DEBUG', 'false').lower() == 'true'
+        self.glm_text_model = os.getenv('GLM_TEXT_MODEL', self.glm_text_model)
+        self.glm_vision_model = os.getenv('GLM_VISION_MODEL', self.glm_vision_model)
+        self.glm_lean_model = os.getenv('GLM_LEAN_MODEL', self.glm_lean_model)
 
     def _load_site_configs(self):
         """Load site configurations from JSON file."""

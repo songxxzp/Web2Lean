@@ -79,7 +79,9 @@ def start_preprocessing():
 
         processor = LLMProcessor(
             db_manager=db,
-            api_key=current_app.config['settings'].zhipu_api_key
+            api_key=current_app.config['settings'].zhipu_api_key,
+            text_model=current_app.config['settings'].glm_text_model,
+            vision_model=current_app.config['settings'].glm_vision_model
         )
 
         def process_questions():

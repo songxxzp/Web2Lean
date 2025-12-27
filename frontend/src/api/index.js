@@ -159,7 +159,16 @@ export const configApi = {
     }),
 
   deleteSchedule: (taskId) =>
-    apiRequest(`/config/schedules/${taskId}`, { method: 'DELETE' })
+    apiRequest(`/config/schedules/${taskId}`, { method: 'DELETE' }),
+
+  getModels: () =>
+    apiRequest('/config/models'),
+
+  updateModels: (models) =>
+    apiRequest('/config/models', {
+      method: 'PUT',
+      body: models
+    })
 }
 
 export default {

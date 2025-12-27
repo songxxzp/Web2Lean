@@ -91,6 +91,65 @@
           </el-table-column>
         </el-table>
       </el-tab-pane>
+
+      <el-tab-pane label="Models" name="models">
+        <el-form label-width="180px" style="max-width: 600px">
+          <el-divider content-position="left">Zhipu AI Models (智谱AI)</el-divider>
+
+          <el-form-item label="Text Model (文本处理)">
+            <el-select v-model="models.glm_text_model" filterable allow-create style="width: 300px">
+              <el-option label="GLM-4.7 (最新推荐)" value="glm-4.7" />
+              <el-option label="GLM-4-Plus" value="glm-4-plus" />
+              <el-option label="GLM-4" value="glm-4" />
+            </el-select>
+            <span style="margin-left: 10px; color: #999;">用于文本预处理和验证</span>
+          </el-form-item>
+
+          <el-form-item label="Vision Model (图像OCR)">
+            <el-select v-model="models.glm_vision_model" filterable allow-create style="width: 300px">
+              <el-option label="GLM-4.6V (最新推荐)" value="glm-4.6v" />
+              <el-option label="GLM-4V" value="glm-4v" />
+            </el-select>
+            <span style="margin-left: 10px; color: #999;">用于图像OCR和识别</span>
+          </el-form-item>
+
+          <el-form-item label="Lean Model (形式化)">
+            <el-select v-model="models.glm_lean_model" filterable allow-create style="width: 300px">
+              <el-option label="使用 Kimina (本地推荐)" value="" />
+              <el-option label="GLM-4.7" value="glm-4.7" />
+              <el-option label="GLM-4-Plus" value="glm-4-plus" />
+              <el-option label="GLM-4" value="glm-4" />
+            </el-select>
+            <span style="margin-left: 10px; color: #999;">用于Lean代码转换(可选)</span>
+          </el-form-item>
+
+          <el-divider content-position="left">Local Models (本地模型)</el-divider>
+
+          <el-form-item label="VLLM Base URL">
+            <el-input v-model="models.vllm_base_url" placeholder="http://localhost:8000/v1" />
+            <span style="margin-left: 10px; color: #999;">VLLM服务地址</span>
+          </el-form-item>
+
+          <el-form-item label="VLLM Model Path">
+            <el-input v-model="models.vllm_model_path" placeholder="/root/Kimina-Autoformalizer-7B" />
+            <span style="margin-left: 10px; color: #999;">本地模型路径</span>
+          </el-form-item>
+
+          <el-form-item>
+            <el-button type="primary" @click="saveModels">Save Models</el-button>
+            <el-button @click="loadModels">Reset</el-button>
+          </el-form-item>
+
+          <el-alert type="info" :closable="false" style="margin-top: 20px;">
+            <strong>模型说明:</strong>
+            <ul style="margin: 10px 0; padding-left: 20px;">
+              <li><strong>GLM-4.7</strong>: 最新最强的文本模型（深度思考模式），用于复杂推理和验证</li>
+              <li><strong>GLM-4.6V</strong>: 最新多模态模型，用于图像OCR和理解</li>
+              <li><strong>Kimina</strong>: 本地运行的Lean专用模型（推荐），需要VLLM服务</li>
+            </ul>
+          </el-alert>
+        </el-form>
+      </el-tab-pane>
     </el-tabs>
 
     <!-- Site Config Dialog -->
@@ -168,6 +227,13 @@ const activeTab = ref('sites')
 const sites = ref([])
 const prompts = ref({})
 const schedules = ref([])
+const models = ref({
+  glm_text_model: 'glm-4.7',
+  glm_vision_model: 'glm-4.6v',
+  glm_lean_model: '',
+  vllm_base_url: 'http://localhost:8000/v1',
+  vllm_model_path: '/root/Kimina-Autoformalizer-7B'
+})
 
 // Site config dialog
 const siteDialogVisible = ref(false)
@@ -274,10 +340,28 @@ function showAddScheduleDialog() {
   ElMessage.info('Add schedule feature - implement as needed')
 }
 
+async function loadModels() {
+  try {
+    models.value = await configApi.getModels()
+  } catch (error) {
+    ElMessage.error('Failed to load models')
+  }
+}
+
+async function saveModels() {
+  try {
+    await configApi.updateModels(models.value)
+    ElMessage.success('Models saved successfully')
+  } catch (error) {
+    ElMessage.error('Failed to save models')
+  }
+}
+
 onMounted(() => {
   loadSites()
   loadPrompts()
   loadSchedules()
+  loadModels()
 })
 </script>
 

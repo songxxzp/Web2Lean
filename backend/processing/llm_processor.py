@@ -3,24 +3,31 @@ LLM Processor for preprocessing mathematical content.
 """
 import json
 import base64
+import logging
 from typing import Dict, Any, Optional
 
 from ..database import DatabaseManager
 from ..utils import ZhipuClient
 
+logger = logging.getLogger(__name__)
+
 
 class LLMProcessor:
     """Process questions using GLM-4V/4 for OCR and content correction."""
 
-    def __init__(self, db_manager: DatabaseManager, api_key: str):
+    def __init__(self, db_manager: DatabaseManager, api_key: str, text_model: str = None, vision_model: str = None):
         """
         Initialize LLM processor.
 
         Args:
             db_manager: Database manager instance
             api_key: Zhipu API key
+            text_model: Model name for text processing (default: from settings)
+            vision_model: Model name for image OCR (default: from settings)
         """
         self.db = db_manager
+        self.text_model = text_model or "glm-4.7"
+        self.vision_model = vision_model or "glm-4.6v"
         self.client = ZhipuClient(api_key=api_key)
 
     def process_question(self, question_internal_id: int) -> Dict[str, Any]:
@@ -37,6 +44,8 @@ class LLMProcessor:
         question = self.db.get_question(question_internal_id)
         if not question:
             raise ValueError(f"Question {question_internal_id} not found")
+
+        logger.info(f"Processing question {question_internal_id}: {question['title'][:50]}...")
 
         # Update status
         self.db.update_processing_status(
@@ -56,11 +65,14 @@ class LLMProcessor:
                         ocr_results[img['original_url']] = ocr_text
 
             # Step 2: Correct content using GLM-4
+            logger.info(f"Calling LLM for question {question_internal_id}")
             corrected = self._correct_content(
                 question['title'],
                 question['body'],
                 question.get('answers', [])
             )
+
+            logger.info(f"LLM completed for question {question_internal_id}: has_errors={corrected.get('has_errors')}")
 
             # Update processing status
             self.db.update_processing_status(
@@ -80,6 +92,7 @@ class LLMProcessor:
             }
 
         except Exception as e:
+            logger.error(f"Error processing question {question_internal_id}: {e}")
             self.db.update_processing_status(
                 question_internal_id,
                 status='failed',
@@ -128,6 +141,7 @@ Respond in JSON format:
             result = self.client.analyze_image(
                 image_url=image_info['original_url'],
                 prompt=prompt,
+                model=self.vision_model,
                 temperature=0.1
             )
 
@@ -175,19 +189,13 @@ Respond in JSON format:
                 # Get highest score answer
                 best_answer = max(answers, key=lambda a: a.get('score', 0))['body']
 
-        # If no answer, just validate question
-        if not best_answer:
-            return {
-                'has_errors': False,
-                'corrected_body': body,
-                'correction_notes': 'No answer to validate against'
-            }
-
         # Use GLM-4 to validate and correct
+        # Even without an answer, validate the question
         result = self.client.correct_content(
             question=question_text,
-            answer=best_answer,
-            temperature=0.2
+            answer=best_answer or "No answer provided",
+            temperature=0.2,
+            model=self.text_model
         )
 
         return {

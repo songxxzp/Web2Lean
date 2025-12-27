@@ -97,3 +97,69 @@ def get_schedules():
         ])
     finally:
         session.close()
+
+
+@config_bp.route('/models', methods=['GET', 'OPTIONS'])
+def get_models():
+    """Get LLM model configuration."""
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    settings = current_app.config['settings']
+    return jsonify({
+        'glm_text_model': settings.glm_text_model,
+        'glm_vision_model': settings.glm_vision_model,
+        'glm_lean_model': settings.glm_lean_model,
+        'vllm_base_url': settings.vllm_base_url,
+        'vllm_model_path': settings.vllm_model_path,
+    })
+
+
+@config_bp.route('/models', methods=['PUT', 'OPTIONS'])
+def update_models():
+    """Update LLM model configuration."""
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    data = request.get_json()
+    settings = current_app.config['settings']
+
+    # Update model settings
+    if 'glm_text_model' in data:
+        settings.glm_text_model = data['glm_text_model']
+    if 'glm_vision_model' in data:
+        settings.glm_vision_model = data['glm_vision_model']
+    if 'glm_lean_model' in data:
+        settings.glm_lean_model = data['glm_lean_model']
+
+    # Save to environment file (optional)
+    try:
+        env_file = settings.base_dir / '.env'
+        env_vars = {}
+        if env_file.exists():
+            with open(env_file, 'r') as f:
+                for line in f:
+                    if '=' in line and not line.startswith('#'):
+                        key, value = line.strip().split('=', 1)
+                        env_vars[key] = value
+
+        # Update model vars
+        env_vars['GLM_TEXT_MODEL'] = settings.glm_text_model
+        env_vars['GLM_VISION_MODEL'] = settings.glm_vision_model
+        env_vars['GLM_LEAN_MODEL'] = settings.glm_lean_model
+
+        with open(env_file, 'w') as f:
+            for key, value in env_vars.items():
+                f.write(f'{key}={value}\n')
+    except Exception as e:
+        # Non-fatal if we can't save .env
+        pass
+
+    return jsonify({
+        'message': 'Models updated successfully',
+        'models': {
+            'glm_text_model': settings.glm_text_model,
+            'glm_vision_model': settings.glm_vision_model,
+            'glm_lean_model': settings.glm_lean_model,
+        }
+    })

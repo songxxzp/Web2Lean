@@ -2,12 +2,21 @@
 LLM API clients for Zhipu GLM and VLLM.
 """
 import os
-import requests
+import json
+import html
+import re
 from typing import Dict, Any, Optional, List
+
+try:
+    from zai import ZhipuAiClient
+    ZAI_AVAILABLE = True
+except ImportError:
+    ZAI_AVAILABLE = False
+    print("Warning: zai-sdk not installed. Using fallback HTTP client.")
 
 
 class ZhipuClient:
-    """Client for Zhipu AI GLM API."""
+    """Client for Zhipu AI GLM API using new zai-sdk."""
 
     def __init__(self, api_key: str = None):
         """
@@ -20,49 +29,35 @@ class ZhipuClient:
         if not self.api_key:
             raise ValueError("Zhipu API key is required. Set ZHIPU_API_KEY environment variable.")
 
-        self.base_url = "https://open.bigmodel.cn/api/paas/v4"
-
-    def _get_headers(self) -> Dict[str, str]:
-        """Get request headers."""
-        return {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        if ZAI_AVAILABLE:
+            self.client = ZhipuAiClient(api_key=self.api_key)
+        else:
+            raise ImportError("zai-sdk is required. Install with: pip install zai-sdk==0.2.0")
 
     def chat_completion(
         self,
         messages: List[Dict[str, str]],
-        model: str = "glm-4",
+        model: str = "glm-4.7",
         temperature: float = 0.7,
         max_tokens: int = 2000,
         **kwargs
     ) -> Dict[str, Any]:
         """
-        Send chat completion request.
+        Send chat completion request using new zai-sdk.
 
         Args:
             messages: List of message dicts with 'role' and 'content'
-            model: Model name (glm-4, glm-4v, etc.)
+            model: Model name (glm-4.7, glm-4.6v, etc.)
             temperature: Sampling temperature
             max_tokens: Maximum tokens to generate
             **kwargs: Additional parameters
 
         Returns:
-            Response JSON
+            Response JSON (compatible with old format)
         """
-        url = f"{self.base_url}/chat/completions"
-
-        payload = {
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            **kwargs
-        }
-
-        # GLM-4V requires special format for images
-        if model == "glm-4v" or "vision" in model.lower():
-            # Format messages for vision model
+        try:
+            # Convert messages format for new SDK
+            # Handle vision model content format
             formatted_messages = []
             for msg in messages:
                 if isinstance(msg.get("content"), list):
@@ -71,18 +66,55 @@ class ZhipuClient:
                 else:
                     formatted_messages.append({
                         "role": msg["role"],
-                        "content": [{"type": "text", "text": msg["content"]}]
+                        "content": msg["content"]
                     })
-            payload["messages"] = formatted_messages
 
-        try:
-            response = requests.post(url, headers=self._get_headers(), json=payload, timeout=120)
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.HTTPError as e:
-            print(f"Zhipu API HTTP error: {e}")
-            print(f"Response: {response.text}")
-            raise
+            # Build request parameters
+            request_params = {
+                "model": model,
+                "messages": formatted_messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+
+            # Add thinking parameter for glm-4.7 and glm-4.6v
+            # Note: For our use cases, we want the actual response, not just reasoning
+            # So we won't enable thinking mode by default
+            # Users can enable it by passing thinking parameter in kwargs if needed
+
+            # Add any additional parameters
+            request_params.update(kwargs)
+
+            # Call new SDK
+            response = self.client.chat.completions.create(**request_params)
+
+            # Extract content from response
+            # glm-4.7/4.6v may use reasoning_content field when thinking mode is enabled
+            message_obj = response.choices[0].message
+            content = message_obj.content or ""
+
+            # If content is empty but reasoning_content exists, use that
+            if not content and hasattr(message_obj, 'reasoning_content') and message_obj.reasoning_content:
+                content = message_obj.reasoning_content
+
+            # Convert response to old format for compatibility
+            return {
+                "choices": [{
+                    "message": {
+                        "role": message_obj.role or "assistant",
+                        "content": content
+                    },
+                    "finish_reason": response.choices[0].finish_reason,
+                    "index": 0
+                }],
+                "usage": {
+                    "prompt_tokens": response.usage.prompt_tokens if hasattr(response, 'usage') else 0,
+                    "completion_tokens": response.usage.completion_tokens if hasattr(response, 'usage') else 0,
+                    "total_tokens": response.usage.total_tokens if hasattr(response, 'usage') else 0
+                },
+                "model": model
+            }
+
         except Exception as e:
             print(f"Zhipu API error: {e}")
             raise
@@ -91,11 +123,11 @@ class ZhipuClient:
         self,
         image_url: str,
         prompt: str,
-        model: str = "glm-4v",
+        model: str = "glm-4.6v",
         temperature: float = 0.1
     ) -> str:
         """
-        Analyze an image using GLM-4V.
+        Analyze an image using GLM-4.6V.
 
         Args:
             image_url: URL or base64 of image
@@ -126,7 +158,8 @@ class ZhipuClient:
         self,
         question: str,
         answer: str,
-        temperature: float = 0.2
+        temperature: float = 0.2,
+        model: str = "glm-4.7"
     ) -> Dict[str, Any]:
         """
         Validate and correct question/answer pair.
@@ -135,6 +168,7 @@ class ZhipuClient:
             question: Question text
             answer: Answer text
             temperature: Sampling temperature
+            model: Model to use (default: glm-4.7 for best quality)
 
         Returns:
             Correction result as dict
@@ -153,7 +187,7 @@ Tasks:
 3. Check for any obvious errors, typos, or ambiguities
 4. Identify if this pair has value for formalization
 
-Respond in JSON format:
+Respond in JSON format only (no additional text):
 {{
   "is_valid_question": true/false,
   "is_valid_answer": true/false,
@@ -169,12 +203,11 @@ Respond in JSON format:
         messages = [{"role": "user", "content": prompt}]
         response = self.chat_completion(
             messages=messages,
-            model="glm-4",
+            model=model,
             temperature=temperature,
             max_tokens=2000
         )
 
-        import json
         content = response["choices"][0]["message"]["content"]
 
         # Try to extract JSON from response
@@ -184,19 +217,91 @@ Respond in JSON format:
                 content = content.split("```json")[1].split("```")[0].strip()
             elif "```" in content:
                 content = content.split("```")[1].split("```")[0].strip()
-            return json.loads(content)
-        except json.JSONDecodeError:
-            return {
-                "is_valid_question": True,
-                "is_valid_answer": True,
-                "has_errors": False,
-                "errors": [],
-                "corrected_question": question,
-                "corrected_answer": answer,
-                "correction_notes": "Could not parse LLM response as JSON",
-                "worth_formalizing": True,
-                "raw_response": content
-            }
+
+            # Try to find the JSON object boundaries
+            start_idx = content.find('{')
+            if start_idx == -1:
+                raise ValueError("No JSON object found in response")
+
+            # Count braces to find matching closing brace
+            brace_count = 0
+            in_string = False
+            escape_next = False
+            end_idx = -1
+
+            for i in range(start_idx, len(content)):
+                char = content[i]
+
+                if escape_next:
+                    escape_next = False
+                    continue
+
+                if char == '\\':
+                    escape_next = True
+                    continue
+
+                if char == '"' and not escape_next:
+                    in_string = not in_string
+                    continue
+
+                if not in_string:
+                    if char == '{':
+                        brace_count += 1
+                    elif char == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            end_idx = i + 1
+                            break
+
+            if end_idx == -1:
+                raise ValueError("Could not find complete JSON object")
+
+            json_str = content[start_idx:end_idx]
+
+            # Fix invalid escape sequences in JSON strings
+            def fix_json_escapes(s):
+                """Fix invalid escape sequences in JSON string values."""
+                result = []
+                i = 0
+                while i < len(s):
+                    if s[i] == '\\' and i + 1 < len(s):
+                        next_char = s[i + 1]
+                        # Valid JSON escapes
+                        if next_char in '"\\/bfnrt':
+                            result.append(s[i:i+2])
+                            i += 2
+                            continue
+                        # Unicode escape like \uXXXX
+                        elif next_char == 'u' and i + 5 < len(s):
+                            result.append(s[i:i+6])
+                            i += 6
+                            continue
+                        # Invalid escapes - remove the backslash for these common LaTeX cases
+                        # Keep the backslash if it's followed by certain chars
+                        elif next_char in '({[<>=_~.*+|?^-]\\\'':
+                            # LaTeX or other special chars - keep the backslash
+                            result.append('\\\\' + next_char)
+                            i += 2
+                        else:
+                            # Other invalid escapes - just remove the backslash
+                            result.append(next_char)
+                            i += 2
+                    else:
+                        result.append(s[i])
+                        i += 1
+                return ''.join(result)
+
+            json_str = fix_json_escapes(json_str)
+
+            # Decode HTML entities before parsing JSON
+            json_str = html.unescape(json_str)
+
+            # Parse JSON
+            return json.loads(json_str)
+
+        except (json.JSONDecodeError, ValueError) as e:
+            # Raise error with more details
+            raise ValueError(f"Could not parse LLM response as JSON: {e}\nRaw response: {content[:800]}")
 
 
 class VLLMClient:
@@ -232,6 +337,8 @@ class VLLMClient:
         Returns:
             Response JSON
         """
+        import requests
+
         url = f"{self.base_url}/chat/completions"
 
         payload = {
