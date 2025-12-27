@@ -42,6 +42,7 @@
           <el-option label="Preprocessed" value="preprocessed" />
           <el-option label="Lean Converted" value="lean_converted" />
           <el-option label="Failed" value="failed" />
+          <el-option label="Can't Convert" value="cant_convert" />
         </el-select>
       </el-form-item>
       <el-form-item>
@@ -101,7 +102,7 @@
     />
 
     <!-- Question Detail Dialog -->
-    <el-dialog v-model="detailVisible" title="Question Detail" width="70%">
+    <el-dialog v-model="detailVisible" :title="selectedQuestion?.title || 'Question Detail'" width="80%">
       <div v-if="selectedQuestion">
         <div style="margin-bottom: 1rem;">
           <el-button-group>
@@ -131,32 +132,68 @@
           </el-button-group>
         </div>
 
-        <h3>{{ selectedQuestion.title }}</h3>
-        <el-descriptions :column="2" border>
+        <el-descriptions :column="2" border style="margin-bottom: 1rem">
           <el-descriptions-item label="ID">{{ selectedQuestion.id }}</el-descriptions-item>
           <el-descriptions-item label="Score">{{ selectedQuestion.score }}</el-descriptions-item>
           <el-descriptions-item label="Status">
-            <el-tag>{{ selectedQuestion.processing_status?.status }}</el-tag>
+            <el-tag>{{ selectedQuestion.processing_status?.status || 'raw' }}</el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="Answers">{{ selectedQuestion.answers?.length || 0 }}</el-descriptions-item>
         </el-descriptions>
 
         <el-tabs v-model="activeTab">
-          <el-tab-pane label="Original Body" name="original">
+          <!-- Raw Question and Answers -->
+          <el-tab-pane label="Raw Content" name="raw">
+            <h4>Question</h4>
             <div class="content">{{ selectedQuestion.body }}</div>
-          </el-tab-pane>
-          <el-tab-pane label="Preprocessed" name="preprocessed">
-            <div class="content">
-              {{ selectedQuestion.processing_status?.preprocessed_body || 'Not processed' }}
+
+            <div v-if="selectedQuestion.answers && selectedQuestion.answers.length > 0">
+              <h4 style="margin-top: 1rem;">Answers ({{ selectedQuestion.answers.length }})</h4>
+              <div v-for="(answer, index) in sortedAnswers" :key="answer.id" class="answer">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 0.5rem;">
+                  <el-tag v-if="answer.is_accepted" type="success" size="small">✓ Accepted</el-tag>
+                  <el-tag v-else type="info" size="small">Answer {{ index + 1 }}</el-tag>
+                  <el-tag size="small">Score: {{ answer.score }}</el-tag>
+                </div>
+                <div class="content">{{ answer.body }}</div>
+              </div>
             </div>
           </el-tab-pane>
-          <el-tab-pane label="Lean Code" name="lean">
-            <pre class="code">{{ selectedQuestion.processing_status?.lean_code || 'Not converted' }}</pre>
+
+          <!-- Preprocessed Content -->
+          <el-tab-pane label="Preprocessed" name="preprocessed">
+            <div v-if="selectedQuestion.processing_status?.preprocessed_body">
+              <h4>Preprocessed Question</h4>
+              <div class="content">{{ selectedQuestion.processing_status.preprocessed_body }}</div>
+
+              <div v-if="selectedQuestion.processing_status.preprocessed_answer">
+                <h4 style="margin-top: 1rem;">Preprocessed Answer</h4>
+                <div class="content">{{ selectedQuestion.processing_status.preprocessed_answer }}</div>
+              </div>
+
+              <div v-if="selectedQuestion.processing_status.correction_notes" style="margin-top: 1rem;">
+                <el-alert type="info" :closable="false">
+                  <strong>Correction Notes:</strong>
+                  <div style="margin-top: 0.5rem; white-space: pre-wrap;">{{ selectedQuestion.processing_status.correction_notes }}</div>
+                </el-alert>
+              </div>
+            </div>
+            <div v-else class="content">Not processed yet</div>
           </el-tab-pane>
-          <el-tab-pane label="Answers" name="answers">
-            <div v-for="(answer, index) in selectedQuestion.answers" :key="answer.id" class="answer">
-              <strong>Answer {{ index + 1 }} {{ answer.is_accepted ? '(✓ Accepted)' : '' }}</strong>
-              <div class="content">{{ answer.body }}</div>
+
+          <!-- Lean Code -->
+          <el-tab-pane label="Lean Code" name="lean">
+            <div v-if="selectedQuestion.processing_status?.lean_code">
+              <h4>Lean Formalization</h4>
+              <pre class="code">{{ selectedQuestion.processing_status.lean_code }}</pre>
+            </div>
+            <div v-else class="content">Not converted yet</div>
+
+            <div v-if="selectedQuestion.processing_status?.lean_error" style="margin-top: 1rem;">
+              <el-alert type="error" :closable="false">
+                <strong>Conversion Error:</strong>
+                <div style="margin-top: 0.5rem; white-space: pre-wrap;">{{ selectedQuestion.processing_status.lean_error }}</div>
+              </el-alert>
             </div>
           </el-tab-pane>
         </el-tabs>
@@ -166,7 +203,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { databaseApi, configApi } from '@/api'
 
@@ -185,8 +222,18 @@ const questions = ref([])
 const sites = ref([])
 const detailVisible = ref(false)
 const selectedQuestion = ref(null)
-const activeTab = ref('original')
+const activeTab = ref('raw')
 const clearing = ref(false)
+
+// Sort answers: accepted first, then by score
+const sortedAnswers = computed(() => {
+  if (!selectedQuestion.value?.answers) return []
+  return [...selectedQuestion.value.answers].sort((a, b) => {
+    if (a.is_accepted && !b.is_accepted) return -1
+    if (!a.is_accepted && b.is_accepted) return 1
+    return b.score - a.score
+  })
+})
 
 async function loadSites() {
   try {
@@ -220,6 +267,7 @@ function showDetail(row) {
   databaseApi.getQuestion(row.id).then(q => {
     selectedQuestion.value = q
     detailVisible.value = true
+    activeTab.value = 'raw'
   }).catch(() => {
     ElMessage.error('Failed to load question detail')
   })
@@ -230,7 +278,8 @@ function getStatusType(status) {
     raw: 'info',
     preprocessed: 'warning',
     lean_converted: 'success',
-    failed: 'danger'
+    failed: 'danger',
+    cant_convert: 'warning'
   }
   return types[status] || 'info'
 }
@@ -341,11 +390,17 @@ onMounted(() => {
   border-radius: 4px;
   max-height: 400px;
   overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .answer {
-  margin-bottom: 1rem;
+  margin-bottom: 1.5rem;
   padding-bottom: 1rem;
   border-bottom: 1px solid #eee;
+}
+
+.answer:last-child {
+  border-bottom: none;
 }
 </style>
