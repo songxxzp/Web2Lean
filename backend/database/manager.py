@@ -308,10 +308,25 @@ class DatabaseManager:
         """List questions with optional filters. Returns dict with questions and total count."""
         session = self.get_session()
         try:
-            # Build base query
-            base_query = session.query(Question, ProcessingStatus).outerjoin(
+            # Build base query with actual answer count
+            from sqlalchemy import func as sql_func
+
+            # Subquery to get actual answer count for each question
+            answer_count_subq = session.query(
+                Answer.question_id,
+                sql_func.count(Answer.id).label('actual_answer_count')
+            ).group_by(Answer.question_id).subquery()
+
+            base_query = session.query(
+                Question,
+                ProcessingStatus,
+                sql_func.coalesce(answer_count_subq.c.actual_answer_count, 0).label('actual_answers')
+            ).outerjoin(
                 ProcessingStatus,
                 Question.id == ProcessingStatus.question_id
+            ).outerjoin(
+                answer_count_subq,
+                Question.id == answer_count_subq.c.question_id
             )
 
             if site_id is not None:
@@ -333,11 +348,11 @@ class DatabaseManager:
                     'site_id': q.site_id,
                     'title': q.title,
                     'score': q.score,
-                    'answer_count': q.answer_count,
+                    'answer_count': actual_answers,  # Use actual answer count from database
                     'status': ps.status if ps else 'raw',
                     'crawled_at': q.crawled_at,
                 }
-                for q, ps in results
+                for q, ps, actual_answers in results
             ]
 
             return {
