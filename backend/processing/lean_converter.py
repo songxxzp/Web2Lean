@@ -142,6 +142,9 @@ Provide the Lean 4 code with appropriate imports and structure."""
             temperature=0.6
         )
 
+        # Post-process: extract only the Lean code, remove prompt text
+        lean_code = self._extract_lean_code(lean_code)
+
         return lean_code
 
     def _convert_answer_to_lean(self, answer: str) -> str:
@@ -167,6 +170,9 @@ Provide the Lean 4 proof code with appropriate structure."""
             max_tokens=2048,
             temperature=0.6
         )
+
+        # Post-process: extract only the Lean code, remove prompt text
+        lean_code = self._extract_lean_code(lean_code)
 
         return lean_code
 
@@ -223,6 +229,131 @@ Provide the Lean 4 proof code with appropriate structure."""
 
         error_msg_lower = error_msg.lower()
         return any(keyword.lower() in error_msg_lower for keyword in program_error_keywords)
+
+    def _extract_lean_code(self, raw_output: str) -> str:
+        """
+        Extract pure Lean code from LLM output, removing prompt text and comments.
+
+        Args:
+            raw_output: Raw LLM output that may contain prompt text
+
+        Returns:
+            Cleaned Lean code
+        """
+        if not raw_output:
+            return raw_output
+
+        lines = raw_output.split('\n')
+
+        # Remove leading blank lines and prompt text
+        # Find the first real Lean code line
+        start_idx = 0
+        found_code = False
+
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+
+            # Skip empty lines
+            if not stripped:
+                continue
+
+            # Check if this looks like prompt text (common patterns)
+            if any(prompt_marker in stripped for prompt_marker in [
+                'Convert the following',
+                'Focus on formalizing',
+                'Provide the Lean',
+                'Problem:',
+                'Solution/Proof:',
+                'mathematical problem',
+                'mathematical solution'
+            ]):
+                continue
+
+            # Check if line starts with Lean keyword or symbol
+            if stripped.startswith('import ') or \
+               stripped.startswith('open ') or \
+               stripped.startswith('theorem ') or \
+               stripped.startswith('definition ') or \
+               stripped.startswith('lemma ') or \
+               stripped.startswith('example ') or \
+               stripped.startswith('def ') or \
+               stripped.startswith('structure ') or \
+               stripped.startswith('class ') or \
+               stripped.startswith('inductive ') or \
+               stripped.startswith('axiom ') or \
+               stripped.startswith('variable') or \
+               stripped.startswith('universe'):
+                start_idx = i
+                found_code = True
+                break
+
+            # Also allow multiline comment starts that might contain code
+            if stripped.startswith('/-'):
+                # Check next few lines for actual code
+                for j in range(i+1, min(i+10, len(lines))):
+                    if any(lines[j].strip().startswith(kw) for kw in ['import ', 'theorem ', 'lemma ', 'def ']):
+                        start_idx = i
+                        found_code = True
+                        break
+                if found_code:
+                    break
+
+        # If no clear code start found, look for first non-trivial line
+        if not found_code:
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if stripped and not stripped.startswith('-') and not any(m in stripped for m in ['Convert', 'Focus', 'Provide', 'Problem:', 'Solution']):
+                    start_idx = i
+                    break
+
+        # Extract from start_idx
+        lean_code = '\n'.join(lines[start_idx:])
+
+        # Remove prompt-containing multiline comments
+        # Look for /- ... -/ blocks that contain prompt text
+        prompt_markers = [
+            'Convert the following',
+            'Focus on formalizing',
+            'Provide the Lean',
+            'Problem:',
+            'Solution/Proof:'
+        ]
+
+        # Find and remove comment blocks with prompt text
+        lines_after_extract = lean_code.split('\n')
+        cleaned_lines = []
+        in_prompt_comment = False
+
+        for line in lines_after_extract:
+            # Check if we're entering a prompt comment
+            if '/-' in line:
+                # Check if this comment or the next few lines contain prompt markers
+                comment_text = line
+                # Look ahead for prompt markers in this comment block
+                temp_idx = lines_after_extract.index(line)
+                for j in range(temp_idx, min(temp_idx + 20, len(lines_after_extract))):
+                    comment_text += lines_after_extract[j]
+                    if '-/' in lines_after_extract[j]:
+                        break
+
+                if any(marker in comment_text for marker in prompt_markers):
+                    in_prompt_comment = True
+                    # Skip this comment line
+                    if '-/' in line:
+                        in_prompt_comment = False
+                    continue
+
+            # Skip lines while in prompt comment
+            if in_prompt_comment:
+                if '-/' in line:
+                    in_prompt_comment = False
+                continue
+
+            cleaned_lines.append(line)
+
+        lean_code = '\n'.join(cleaned_lines)
+
+        return lean_code.strip()
 
     def _now(self) -> str:
         """Get current timestamp."""
