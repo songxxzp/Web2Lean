@@ -78,7 +78,9 @@ class Settings:
         self.api_debug = os.getenv('API_DEBUG', 'false').lower() == 'true'
         self.glm_text_model = os.getenv('GLM_TEXT_MODEL', self.glm_text_model)
         self.glm_vision_model = os.getenv('GLM_VISION_MODEL', self.glm_vision_model)
-        self.glm_lean_model = os.getenv('GLM_LEAN_MODEL', self.glm_lean_model)
+        # Handle "local" as empty string for Kimina model
+        lean_model = os.getenv('GLM_LEAN_MODEL', self.glm_lean_model)
+        self.glm_lean_model = '' if lean_model == 'local' else lean_model
 
     def _load_site_configs(self):
         """Load site configurations from JSON file."""

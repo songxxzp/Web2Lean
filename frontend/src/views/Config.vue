@@ -115,7 +115,7 @@
 
           <el-form-item label="Lean Model (形式化)">
             <el-select v-model="models.glm_lean_model" filterable allow-create style="width: 300px">
-              <el-option label="Local Model (Kimina本地推荐)" value="" />
+              <el-option label="Local Model (Kimina本地推荐)" value="local" />
               <el-option label="GLM-4.7" value="glm-4.7" />
               <el-option label="GLM-4-Plus" value="glm-4-plus" />
               <el-option label="GLM-4" value="glm-4" />
@@ -230,7 +230,7 @@ const schedules = ref([])
 const models = ref({
   glm_text_model: 'glm-4.7',
   glm_vision_model: 'glm-4.6v',
-  glm_lean_model: '',
+  glm_lean_model: 'local',
   vllm_base_url: 'http://localhost:8000/v1',
   vllm_model_path: '/root/Kimina-Autoformalizer-7B'
 })

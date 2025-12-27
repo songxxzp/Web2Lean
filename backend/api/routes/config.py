@@ -106,10 +106,12 @@ def get_models():
         return '', 200
 
     settings = current_app.config['settings']
+    # Convert empty string to 'local' for frontend
+    lean_model = settings.glm_lean_model if settings.glm_lean_model else 'local'
     return jsonify({
         'glm_text_model': settings.glm_text_model,
         'glm_vision_model': settings.glm_vision_model,
-        'glm_lean_model': settings.glm_lean_model,
+        'glm_lean_model': lean_model,
         'vllm_base_url': settings.vllm_base_url,
         'vllm_model_path': settings.vllm_model_path,
     })
@@ -130,7 +132,9 @@ def update_models():
     if 'glm_vision_model' in data:
         settings.glm_vision_model = data['glm_vision_model']
     if 'glm_lean_model' in data:
-        settings.glm_lean_model = data['glm_lean_model']
+        # Convert 'local' back to empty string for internal use
+        lean_model = data['glm_lean_model']
+        settings.glm_lean_model = '' if lean_model == 'local' else lean_model
 
     # Save to environment file (optional)
     try:
@@ -155,11 +159,13 @@ def update_models():
         # Non-fatal if we can't save .env
         pass
 
+    # Convert back to 'local' for response
+    lean_model_response = settings.glm_lean_model if settings.glm_lean_model else 'local'
     return jsonify({
         'message': 'Models updated successfully',
         'models': {
             'glm_text_model': settings.glm_text_model,
             'glm_vision_model': settings.glm_vision_model,
-            'glm_lean_model': settings.glm_lean_model,
+            'glm_lean_model': lean_model_response,
         }
     })

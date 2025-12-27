@@ -20,13 +20,27 @@ def start_lean_conversion():
 
     db = current_app.config['db']
 
+    # Check if there's an active task
+    from ...processing import TaskManager
+    task_manager = TaskManager()
+    active_task = task_manager.get_active_task('lean_conversion')
+    if active_task:
+        return jsonify({
+            'error': 'Lean conversion already in progress',
+            'task_id': active_task.task_id,
+            'progress': active_task.get_progress()
+        }), 400
+
     # Get questions ready for conversion (preprocessed but not yet converted)
     questions = db.get_questions_by_status('preprocessed', limit=limit)
 
     if not questions:
         return jsonify({'message': 'No questions ready for Lean conversion'})
 
-    # Import processor
+    # Create task
+    task = task_manager.create_task('lean_conversion', len(questions))
+
+    # Import converter
     try:
         from ...processing import LeanConverter
 
@@ -38,22 +52,42 @@ def start_lean_conversion():
 
         def process_questions():
             for q in questions:
+                # Check if task is paused
+                task.wait_if_paused()
+
+                # Check if task is stopped
+                if task.is_stopped():
+                    break
+
                 if site_id and q['site_id'] != site_id:
                     continue
+
+                task.current_question_id = q['id']
                 try:
                     converter.convert_question(q['id'])
+                    task.increment_progress(success=True)
                 except Exception as e:
                     print(f"Error converting question {q['id']}: {e}")
+                    task.increment_progress(success=False)
+
+            # Mark task as completed
+            task.status = 'completed'
+            task.completed_at = task.completed_at or __import__('datetime').datetime.now()
+            task.current_question_id = None
 
         thread = threading.Thread(target=process_questions, daemon=True)
         thread.start()
 
         return jsonify({
             'message': f'Started Lean conversion for {len(questions)} questions',
-            'count': len(questions)
+            'task_id': task.task_id,
+            'count': len(questions),
+            'progress': task.get_progress()
         })
 
     except Exception as e:
+        task.status = 'error'
+        task.error_message = str(e)
         return jsonify({'error': str(e)}), 500
 
 
@@ -69,11 +103,25 @@ def start_preprocessing():
 
     db = current_app.config['db']
 
+    # Check if there's an active task
+    from ...processing import TaskManager
+    task_manager = TaskManager()
+    active_task = task_manager.get_active_task('preprocessing')
+    if active_task:
+        return jsonify({
+            'error': 'Preprocessing already in progress',
+            'task_id': active_task.task_id,
+            'progress': active_task.get_progress()
+        }), 400
+
     # Get raw questions
     questions = db.get_questions_by_status('raw', limit=limit)
 
     if not questions:
         return jsonify({'message': 'No questions to preprocess'})
+
+    # Create task
+    task = task_manager.create_task('preprocessing', len(questions))
 
     try:
         from ...processing import LLMProcessor
@@ -87,8 +135,17 @@ def start_preprocessing():
 
         def process_questions():
             for i, q in enumerate(questions):
+                # Check if task is paused
+                task.wait_if_paused()
+
+                # Check if task is stopped
+                if task.is_stopped():
+                    break
+
                 if site_id and q['site_id'] != site_id:
                     continue
+
+                task.current_question_id = q['id']
 
                 # Add delay between requests to avoid rate limiting
                 if i > 0:
@@ -96,9 +153,11 @@ def start_preprocessing():
 
                 # Retry logic for rate limiting
                 max_retries = 3
+                success = False
                 for attempt in range(max_retries):
                     try:
                         processor.process_question(q['id'])
+                        success = True
                         break  # Success, move to next question
                     except Exception as e:
                         error_str = str(e)
@@ -116,16 +175,91 @@ def start_preprocessing():
                             print(f"Error preprocessing question {q['id']}: {e}")
                             break
 
+                task.increment_progress(success=success)
+
+            # Mark task as completed
+            task.status = 'completed'
+            task.completed_at = task.completed_at or __import__('datetime').datetime.now()
+            task.current_question_id = None
+
         thread = threading.Thread(target=process_questions, daemon=True)
         thread.start()
 
         return jsonify({
             'message': f'Started preprocessing for {len(questions)} questions',
-            'count': len(questions)
+            'task_id': task.task_id,
+            'count': len(questions),
+            'progress': task.get_progress()
         })
 
     except Exception as e:
+        task.status = 'error'
+        task.error_message = str(e)
         return jsonify({'error': str(e)}), 500
+
+
+@processing_bp.route('/task/<task_type>/progress', methods=['GET', 'OPTIONS'])
+def get_task_progress(task_type: str):
+    """Get progress of current task of given type."""
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    from ...processing import TaskManager
+    task_manager = TaskManager()
+
+    task = task_manager.get_active_task(task_type)
+    if not task:
+        return jsonify({'active': False})
+
+    return jsonify({
+        'active': True,
+        'progress': task.get_progress()
+    })
+
+
+@processing_bp.route('/task/<task_id>/pause', methods=['POST', 'OPTIONS'])
+def pause_task(task_id: str):
+    """Pause a running task."""
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    from ...processing import TaskManager
+    task_manager = TaskManager()
+
+    if task_manager.pause_task(task_id):
+        return jsonify({'message': 'Task paused'})
+
+    return jsonify({'error': 'Task not found'}), 404
+
+
+@processing_bp.route('/task/<task_id>/resume', methods=['POST', 'OPTIONS'])
+def resume_task(task_id: str):
+    """Resume a paused task."""
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    from ...processing import TaskManager
+    task_manager = TaskManager()
+
+    if task_manager.resume_task(task_id):
+        return jsonify({'message': 'Task resumed'})
+
+    return jsonify({'error': 'Task not found'}), 404
+
+
+@processing_bp.route('/task/<task_id>/stop', methods=['POST', 'OPTIONS'])
+def stop_task(task_id: str):
+    """Stop a running or paused task."""
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    from ...processing import TaskManager
+    task_manager = TaskManager()
+
+    if task_manager.stop_task(task_id):
+        return jsonify({'message': 'Task stopped'})
+
+    return jsonify({'error': 'Task not found'}), 404
 
 
 @processing_bp.route('/status/<int:question_id>', methods=['GET', 'OPTIONS'])

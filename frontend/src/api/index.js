@@ -81,6 +81,18 @@ export const processingApi = {
       body: options
     }),
 
+  getProgress: (taskType) =>
+    apiRequest(`/processing/task/${taskType}/progress`),
+
+  pauseTask: (taskId) =>
+    apiRequest(`/processing/task/${taskId}/pause`, { method: 'POST' }),
+
+  resumeTask: (taskId) =>
+    apiRequest(`/processing/task/${taskId}/resume`, { method: 'POST' }),
+
+  stopTask: (taskId) =>
+    apiRequest(`/processing/task/${taskId}/stop`, { method: 'POST' }),
+
   getStatus: (questionId) =>
     apiRequest(`/processing/status/${questionId}`),
 
