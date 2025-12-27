@@ -392,3 +392,275 @@ class VLLMClient:
         )
 
         return response["choices"][0]["message"]["content"]
+
+    def validate_and_select_answer(
+        self,
+        question: str,
+        answers: list,
+        temperature: float = 0.2,
+        model: str = "glm-4.7"
+    ) -> Dict[str, Any]:
+        """
+        Validate question and select best answer from multiple answers.
+
+        Args:
+            question: Question text
+            answers: List of answer dicts with 'body', 'is_accepted', 'score'
+            temperature: Sampling temperature
+            model: Model to use
+
+        Returns:
+            Validation result with selected answer info
+        """
+        # Format answers for LLM
+        answers_text = ""
+        for i, ans in enumerate(answers):
+            accepted_mark = " ✓ ACCEPTED" if ans.get('is_accepted') else ""
+            score_info = f" (score: {ans.get('score', 0)})" if 'score' in ans else ""
+            answers_text += f"\n--- Answer {i+1}{accepted_mark}{score_info} ---\n{ans.get('body', '')}\n"
+
+        prompt = f"""Analyze this mathematical question and its answers:
+
+--- QUESTION ---
+{question}
+
+--- ANSWERS ---
+{answers_text}
+
+Tasks:
+1. Verify if the question is well-formed and mathematically valid
+2. Review each answer and determine if it correctly addresses the question
+3. Select the best answer (most correct, complete, and clear)
+4. If all answers are incorrect or irrelevant, indicate that
+
+Respond in JSON format only (no additional text):
+{{
+  "is_valid_question": true/false,
+  "question_errors": ["list of issues with the question"],
+  "answers_analysis": [
+    {{
+      "answer_index": 1,
+      "is_correct": true/false,
+      "is_complete": true/false,
+      "issues": ["list of issues if any"]
+    }}
+  ],
+  "best_answer_index": <index of best answer or -1 if none are correct>,
+  "best_answer_summary": "brief explanation of why this answer is best",
+  "correction_notes": "overall assessment and recommendations"
+}}"""
+
+        messages = [{"role": "user", "content": prompt}]
+        response = self.chat_completion(
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=3000
+        )
+
+        content = response["choices"][0]["message"]["content"]
+
+        # Try to extract JSON from response
+        try:
+            # Remove markdown code blocks if present
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0].strip()
+            elif "```" in content:
+                content = content.split("```")[1].split("```")[0].strip()
+
+            # Try to find the JSON object boundaries
+            start_idx = content.find('{')
+            if start_idx == -1:
+                raise ValueError("No JSON object found in response")
+
+            # Count braces to find matching closing brace
+            brace_count = 0
+            in_string = False
+            escape_next = False
+            end_idx = -1
+
+            for i in range(start_idx, len(content)):
+                char = content[i]
+
+                if escape_next:
+                    escape_next = False
+                    continue
+
+                if char == '\\':
+                    escape_next = True
+                    continue
+
+                if char == '"' and not escape_next:
+                    in_string = not in_string
+                    continue
+
+                if not in_string:
+                    if char == '{':
+                        brace_count += 1
+                    elif char == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            end_idx = i + 1
+                            break
+
+            if end_idx == -1:
+                raise ValueError("Could not find complete JSON object")
+
+            json_str = content[start_idx:end_idx]
+
+            # Fix invalid escape sequences
+            def fix_json_escapes(s):
+                result = []
+                i = 0
+                while i < len(s):
+                    if s[i] == '\\' and i + 1 < len(s):
+                        next_char = s[i + 1]
+                        if next_char in '"\\/bfnrt':
+                            result.append(s[i:i+2])
+                            i += 2
+                            continue
+                        elif next_char == 'u' and i + 5 < len(s):
+                            result.append(s[i:i+6])
+                            i += 6
+                            continue
+                        elif next_char in '({[<>=_~.*+|?^-]\\\'':
+                            result.append('\\\\' + next_char)
+                            i += 2
+                            continue
+                        else:
+                            result.append(next_char)
+                            i += 2
+                    else:
+                        result.append(s[i])
+                        i += 1
+                return ''.join(result)
+
+            json_str = fix_json_escapes(json_str)
+            json_str = html.unescape(json_str)
+
+            return json.loads(json_str)
+
+        except (json.JSONDecodeError, ValueError) as e:
+            raise ValueError(f"Could not parse LLM response as JSON: {e}\nRaw response: {content[:800]}")
+
+    def correct_question_only(
+        self,
+        question: str,
+        temperature: float = 0.2,
+        model: str = "glm-4.7"
+    ) -> Dict[str, Any]:
+        """
+        Validate and correct a question without an answer.
+
+        Args:
+            question: Question text
+            temperature: Sampling temperature
+            model: Model to use
+
+        Returns:
+            Correction result as dict
+        """
+        prompt = f"""Analyze this mathematical question:
+
+--- QUESTION ---
+{question}
+
+Tasks:
+1. Verify if the question is well-formed and mathematically valid
+2. Check for any obvious errors, typos, or ambiguities
+3. Identify if it has value for formalization
+
+Respond in JSON format only (no additional text):
+{{
+  "is_valid_question": true/false,
+  "has_errors": true/false,
+  "errors": ["list of specific issues found"],
+  "corrected_question": "corrected version if needed, else original",
+  "correction_notes": "detailed explanation of corrections made",
+  "worth_formalizing": true/false
+}}"""
+
+        messages = [{"role": "user", "content": prompt}]
+        response = self.chat_completion(
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=1500
+        )
+
+        content = response["choices"][0]["message"]["content"]
+
+        # Try to extract JSON from response
+        try:
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0].strip()
+            elif "```" in content:
+                content = content.split("```")[1].split("```")[0].strip()
+
+            start_idx = content.find('{')
+            if start_idx == -1:
+                raise ValueError("No JSON object found in response")
+
+            brace_count = 0
+            in_string = False
+            escape_next = False
+            end_idx = -1
+
+            for i in range(start_idx, len(content)):
+                char = content[i]
+                if escape_next:
+                    escape_next = False
+                    continue
+                if char == '\\':
+                    escape_next = True
+                    continue
+                if char == '"' and not escape_next:
+                    in_string = not in_string
+                    continue
+                if not in_string:
+                    if char == '{':
+                        brace_count += 1
+                    elif char == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            end_idx = i + 1
+                            break
+
+            if end_idx == -1:
+                raise ValueError("Could not find complete JSON object")
+
+            json_str = content[start_idx:end_idx]
+
+            def fix_json_escapes(s):
+                result = []
+                i = 0
+                while i < len(s):
+                    if s[i] == '\\' and i + 1 < len(s):
+                        next_char = s[i + 1]
+                        if next_char in '"\\/bfnrt':
+                            result.append(s[i:i+2])
+                            i += 2
+                            continue
+                        elif next_char == 'u' and i + 5 < len(s):
+                            result.append(s[i:i+6])
+                            i += 6
+                            continue
+                        elif next_char in '({[<>=_~.*+|?^-]\\\'':
+                            result.append('\\\\' + next_char)
+                            i += 2
+                            continue
+                        else:
+                            result.append(next_char)
+                            i += 2
+                    else:
+                        result.append(s[i])
+                        i += 1
+                return ''.join(result)
+
+            json_str = fix_json_escapes(json_str)
+            json_str = html.unescape(json_str)
+
+            return json.loads(json_str)
+
+        except (json.JSONDecodeError, ValueError) as e:
+            raise ValueError(f"Could not parse LLM response as JSON: {e}\nRaw response: {content[:800]}")

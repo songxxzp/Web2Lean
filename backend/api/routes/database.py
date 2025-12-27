@@ -30,9 +30,9 @@ def clear_data():
             return jsonify({'message': f'Cleared lean code from {count} questions'})
 
         elif stage == 'preprocess':
-            # Clear preprocessed data, lean code, and failed status
+            # Clear preprocessed data, lean code, and failed/cant_convert status
             ps_query = session.query(ProcessingStatus).filter(
-                ProcessingStatus.status.in_(['preprocessed', 'lean_converted', 'failed'])
+                ProcessingStatus.status.in_(['preprocessed', 'lean_converted', 'failed', 'cant_convert'])
             )
             count = ps_query.count()
             ps_query.update({
@@ -128,7 +128,7 @@ def clear_question_stage(question_id: int):
             return jsonify({'message': 'Cleared lean code'})
 
         elif stage == 'preprocess':
-            # Clear preprocessed data, lean code, and failed status
+            # Clear preprocessed data, lean code, and failed/cant_convert status
             ps = session.query(ProcessingStatus).filter(
                 ProcessingStatus.question_id == question_id
             ).first()
@@ -138,8 +138,8 @@ def clear_question_stage(question_id: int):
                 ps.correction_notes = None
                 ps.lean_code = None
                 ps.lean_error = None
-                # Reset to raw for both preprocessed and failed statuses
-                if ps.status in ['preprocessed', 'lean_converted', 'failed']:
+                # Reset to raw for preprocessed, lean_converted, failed, cant_convert
+                if ps.status in ['preprocessed', 'lean_converted', 'failed', 'cant_convert']:
                     ps.status = 'raw'
                 ps.current_stage = None
             session.commit()

@@ -1,8 +1,7 @@
 """
-LLM Processor for preprocessing mathematical content.
+LLM Processor for preprocessing mathematical content with improved answer handling.
 """
 import json
-import base64
 import logging
 from typing import Dict, Any, Optional
 
@@ -32,7 +31,12 @@ class LLMProcessor:
 
     def process_question(self, question_internal_id: int) -> Dict[str, Any]:
         """
-        Process a question through LLM preprocessing.
+        Process a question through LLM preprocessing with new logic:
+        - No answer: process question only
+        - One answer: validate and process question+answer
+        - Multiple answers: LLM selects best, process question+best answer
+        - No correct answer: process question only (if question valid)
+        - Invalid question: mark as cant_convert
 
         Args:
             question_internal_id: Internal database question ID
@@ -56,6 +60,10 @@ class LLMProcessor:
         )
 
         try:
+            # Combine title and body
+            question_text = f"{question['title']}\n\n{question['body']}"
+            answers = question.get('answers', [])
+
             # Step 1: Process images (OCR if applicable)
             ocr_results = {}
             if question.get('images'):
@@ -64,47 +72,231 @@ class LLMProcessor:
                     if ocr_text:
                         ocr_results[img['original_url']] = ocr_text
 
-            # Step 2: Correct content using GLM-4
-            logger.info(f"Calling LLM for question {question_internal_id}")
-            corrected = self._correct_content(
-                question['title'],
-                question['body'],
-                question.get('answers', [])
-            )
+            # Step 2: Determine processing strategy based on answers
+            if not answers:
+                # No answers - process question only
+                logger.info(f"Question {question_internal_id} has no answers, processing question only")
+                result = self._process_question_only(question_text)
+
+            elif len(answers) == 1:
+                # One answer - validate both
+                logger.info(f"Question {question_internal_id} has 1 answer, validating question+answer")
+                result = self._process_question_with_answer(
+                    question_text,
+                    answers[0]['body']
+                )
+
+            else:
+                # Multiple answers - let LLM select best
+                logger.info(f"Question {question_internal_id} has {len(answers)} answers, selecting best")
+                result = self._process_with_multiple_answers(
+                    question_text,
+                    answers
+                )
+
+            # Handle result
+            if result.get('status') == 'cant_convert':
+                # Question is invalid, mark as cant_convert
+                self.db.update_processing_status(
+                    question_internal_id,
+                    status='cant_convert',
+                    ocr_completed=bool(ocr_results),
+                    correction_notes=result.get('correction_notes', 'Question cannot be formalized'),
+                    processing_completed_at=self._now()
+                )
+                return {
+                    'success': True,
+                    'status': 'cant_convert',
+                    'reason': result.get('correction_notes')
+                }
 
             # Validate response
-            if not corrected or not isinstance(corrected, dict):
-                raise ValueError(f"LLM returned invalid response: {corrected}")
+            if not result or not isinstance(result, dict):
+                raise ValueError(f"Invalid processing result: {result}")
 
-            logger.info(f"LLM completed for question {question_internal_id}: has_errors={corrected.get('has_errors')}")
+            logger.info(f"LLM completed for question {question_internal_id}: has_answer={bool(result.get('preprocessed_answer'))}")
 
-            # Update processing status
+            # Update processing status with preprocessed data
             self.db.update_processing_status(
                 question_internal_id,
                 status='preprocessed',
                 ocr_completed=bool(ocr_results),
-                preprocessed_body=corrected.get('corrected_body', question['body']),
-                preprocessed_answer=corrected.get('corrected_answer'),
-                correction_notes=corrected.get('correction_notes'),
+                preprocessed_body=result.get('preprocessed_body', question['body']),
+                preprocessed_answer=result.get('preprocessed_answer'),
+                correction_notes=result.get('correction_notes'),
                 processing_completed_at=self._now()
             )
 
             return {
                 'success': True,
+                'status': 'preprocessed',
                 'ocr_count': len(ocr_results),
-                'corrected': corrected.get('has_errors', False)
+                'has_answer': bool(result.get('preprocessed_answer'))
             }
 
         except Exception as e:
-            logger.error(f"Error processing question {question_internal_id}: {e}")
-            self.db.update_processing_status(
-                question_internal_id,
-                status='failed',
-                current_stage='llm_correction',
-                lean_error=str(e),
-                processing_completed_at=self._now()
+            # Determine if this is a program error or invalid content
+            error_msg = str(e)
+            is_program_error = self._is_program_error(error_msg)
+
+            if is_program_error:
+                # Program error - mark as failed (can retry)
+                logger.error(f"Program error processing question {question_internal_id}: {e}")
+                self.db.update_processing_status(
+                    question_internal_id,
+                    status='failed',
+                    current_stage='llm_correction',
+                    lean_error=f"Program error: {error_msg}",
+                    processing_completed_at=self._now()
+                )
+                raise
+            else:
+                # Content error - mark as cant_convert (won't be fixed by retry)
+                logger.warning(f"Content error processing question {question_internal_id}: {e}")
+                self.db.update_processing_status(
+                    question_internal_id,
+                    status='cant_convert',
+                    correction_notes=f"Content validation error: {error_msg}",
+                    processing_completed_at=self._now()
+                )
+                return {
+                    'success': False,
+                    'status': 'cant_convert',
+                    'error': error_msg
+                }
+
+    def _process_question_only(self, question_text: str) -> Dict[str, Any]:
+        """
+        Process a question without any answer.
+
+        Args:
+            question_text: Question text
+
+        Returns:
+            Processing result dict
+        """
+        try:
+            result = self.client.correct_question_only(
+                question=question_text,
+                temperature=0.2,
+                model=self.text_model
             )
-            raise
+
+            # Check if question is valid
+            if not result.get('is_valid_question'):
+                return {
+                    'status': 'cant_convert',
+                    'correction_notes': result.get('correction_notes', 'Question is not valid for formalization')
+                }
+
+            return {
+                'status': 'preprocessed',
+                'preprocessed_body': result.get('corrected_question', question_text),
+                'correction_notes': result.get('correction_notes', '')
+            }
+
+        except Exception as e:
+            # Re-raise to be caught by outer handler
+            raise ValueError(f"Question validation failed: {e}")
+
+    def _process_question_with_answer(self, question_text: str, answer_text: str) -> Dict[str, Any]:
+        """
+        Process a question with a single answer.
+
+        Args:
+            question_text: Question text
+            answer_text: Answer text
+
+        Returns:
+            Processing result dict
+        """
+        try:
+            result = self.client.correct_content(
+                question=question_text,
+                answer=answer_text,
+                temperature=0.2,
+                model=self.text_model
+            )
+
+            # Check if question is valid
+            if not result.get('is_valid_question'):
+                return {
+                    'status': 'cant_convert',
+                    'correction_notes': result.get('correction_notes', 'Question is not valid')
+                }
+
+            # Determine if we should include the answer
+            should_include_answer = (
+                result.get('is_valid_answer', False) and
+                result.get('worth_formalizing', True)
+            )
+
+            if should_include_answer:
+                return {
+                    'status': 'preprocessed',
+                    'preprocessed_body': result.get('corrected_question', question_text),
+                    'preprocessed_answer': result.get('corrected_answer', answer_text),
+                    'correction_notes': result.get('correction_notes', '')
+                }
+            else:
+                # Answer is not valid, process question only
+                return {
+                    'status': 'preprocessed',
+                    'preprocessed_body': result.get('corrected_question', question_text),
+                    'correction_notes': result.get('correction_notes', '') + " [Answer excluded: not valid]"
+                }
+
+        except Exception as e:
+            raise ValueError(f"Question+answer validation failed: {e}")
+
+    def _process_with_multiple_answers(self, question_text: str, answers: list) -> Dict[str, Any]:
+        """
+        Process a question with multiple answers, selecting the best one.
+
+        Args:
+            question_text: Question text
+            answers: List of answer dicts
+
+        Returns:
+            Processing result dict
+        """
+        try:
+            result = self.client.validate_and_select_answer(
+                question=question_text,
+                answers=answers,
+                temperature=0.2,
+                model=self.text_model
+            )
+
+            # Check if question is valid
+            if not result.get('is_valid_question'):
+                return {
+                    'status': 'cant_convert',
+                    'correction_notes': result.get('correction_notes', 'Question is not valid')
+                }
+
+            # Check if a valid answer was selected
+            best_index = result.get('best_answer_index', -1)
+
+            if best_index >= 0 and best_index < len(answers):
+                # Valid answer found
+                selected_answer = answers[best_index]['body']
+                return {
+                    'status': 'preprocessed',
+                    'preprocessed_body': question_text,  # Keep original, LLM can correct later
+                    'preprocessed_answer': selected_answer,
+                    'correction_notes': f"Selected answer {best_index + 1}/{len(answers)}: {result.get('best_answer_summary', '')}"
+                }
+            else:
+                # No valid answer, process question only
+                return {
+                    'status': 'preprocessed',
+                    'preprocessed_body': question_text,
+                    'correction_notes': "No valid answer found, processing question only"
+                }
+
+        except Exception as e:
+            raise ValueError(f"Multiple answer validation failed: {e}")
 
     def _process_image(self, image_info: Dict[str, Any]) -> Optional[str]:
         """
@@ -117,18 +309,12 @@ class LLMProcessor:
             OCR text or None
         """
         try:
-            # Prepare image for GLM-4V
-            # If image_data exists, convert to base64
             if 'image_data' not in image_info:
                 return None
 
-            image_data = image_info['image_data']
-            # For large images, we'd need to save to file or use URL
-            # For now, skip if no URL available
             if not image_info.get('original_url'):
                 return None
 
-            # Use GLM-4V to analyze
             prompt = """You are a mathematical content analyzer. Examine this image and determine:
 
 1. Does this image contain primarily mathematical notation, text, or diagrams that can be converted to text/LaTeX?
@@ -160,56 +346,47 @@ Respond in JSON format:
             return None
 
         except Exception as e:
-            print(f"Error processing image: {e}")
+            logger.warning(f"Error processing image: {e}")
             return None
 
-    def _correct_content(
-        self,
-        title: str,
-        body: str,
-        answers: list
-    ) -> Dict[str, Any]:
+    def _is_program_error(self, error_msg: str) -> bool:
         """
-        Correct question/answer content using GLM-4.
+        Determine if an error is a program error (retryable) or content error (not retryable).
+
+        Program errors:
+        - API errors (timeout, rate limit, connection)
+        - JSON parsing errors (LLM returned invalid format)
+        - Network errors
+
+        Content errors:
+        - Validation failures (question invalid)
+        - Content issues
 
         Args:
-            title: Question title
-            body: Question body
-            answers: List of answers
+            error_msg: Error message string
 
         Returns:
-            Correction result dict
+            True if program error, False if content error
         """
-        # Combine title and body
-        question_text = f"{title}\n\n{body}"
+        program_error_keywords = [
+            'timeout',
+            'connection',
+            'network',
+            'rate limit',
+            '429',
+            '500',
+            '502',
+            '503',
+            '504',
+            'JSON',
+            'parse',
+            'API',
+            'zhipu',
+            'zai-sdk'
+        ]
 
-        # Get best answer (accepted or highest score)
-        best_answer = None
-        if answers:
-            accepted = [a for a in answers if a.get('is_accepted')]
-            if accepted:
-                best_answer = accepted[0]['body']
-            else:
-                # Get highest score answer
-                best_answer = max(answers, key=lambda a: a.get('score', 0))['body']
-
-        # Use GLM-4 to validate and correct
-        # Even without an answer, validate the question
-        result = self.client.correct_content(
-            question=question_text,
-            answer=best_answer or "No answer provided",
-            temperature=0.2,
-            model=self.text_model
-        )
-
-        return {
-            'has_errors': result.get('has_errors', False),
-            'errors': result.get('errors', []),
-            'corrected_body': result.get('corrected_question', body),
-            'corrected_answer': result.get('corrected_answer', best_answer),
-            'correction_notes': result.get('correction_notes', ''),
-            'worth_formalizing': result.get('worth_formalizing', True),
-        }
+        error_msg_lower = error_msg.lower()
+        return any(keyword.lower() in error_msg_lower for keyword in program_error_keywords)
 
     def _now(self) -> str:
         """Get current timestamp."""

@@ -1,5 +1,6 @@
 """
 Lean converter using Kimina-Autoformalizer-7B via VLLM.
+Converts questions and answers separately to Lean 4.
 """
 from typing import Dict, Any
 
@@ -29,7 +30,7 @@ class LeanConverter:
 
     def convert_question(self, question_internal_id: int) -> Dict[str, Any]:
         """
-        Convert a question to Lean 4.
+        Convert a question and its answer to Lean 4 (separately).
 
         Args:
             question_internal_id: Internal database question ID
@@ -44,8 +45,11 @@ class LeanConverter:
 
         # Check if preprocessed
         status = question.get('processing_status', {})
-        if status.get('status') != 'preprocessed':
-            raise ValueError(f"Question {question_internal_id} is not preprocessed")
+        current_status = status.get('status')
+
+        # Allow conversion from preprocessed or cant_convert status
+        if current_status not in ['preprocessed', 'cant_convert']:
+            raise ValueError(f"Question {question_internal_id} is not ready for Lean conversion (status: {current_status})")
 
         # Update status
         self.db.update_processing_status(
@@ -59,55 +63,162 @@ class LeanConverter:
             body = status.get('preprocessed_body') or question['body']
             answer = status.get('preprocessed_answer')
 
-            # Format problem for conversion
-            problem_text = self._format_problem(question['title'], body, answer)
+            # Convert question to Lean
+            question_lean = self._convert_question_to_lean(question['title'], body)
 
-            # Convert to Lean
-            lean_code = self.client.convert_to_lean(
-                problem_text=problem_text,
-                max_tokens=2048,
-                temperature=0.6
-            )
+            # Convert answer to Lean if available
+            answer_lean = None
+            if answer:
+                answer_lean = self._convert_answer_to_lean(answer)
+
+            # Combine question and answer Lean code
+            combined_lean = self._combine_lean_code(question_lean, answer_lean)
 
             # Update processing status
             self.db.update_processing_status(
                 question_internal_id,
                 status='lean_converted',
-                lean_code=lean_code,
+                lean_code=combined_lean,
                 processing_completed_at=self._now()
             )
 
             return {
                 'success': True,
-                'lean_code': lean_code
+                'lean_code': combined_lean,
+                'has_answer': answer_lean is not None
             }
 
         except Exception as e:
+            # Determine if this is a program error
             error_msg = str(e)
-            self.db.update_processing_status(
-                question_internal_id,
-                status='failed',
-                lean_error=error_msg,
-                processing_completed_at=self._now()
-            )
-            raise
+            is_program_error = self._is_program_error(error_msg)
 
-    def _format_problem(self, title: str, body: str, answer: str = None) -> str:
+            if is_program_error:
+                # Program error - mark as failed (can retry)
+                self.db.update_processing_status(
+                    question_internal_id,
+                    status='failed',
+                    lean_error=f"Lean conversion program error: {error_msg}",
+                    processing_completed_at=self._now()
+                )
+                raise
+            else:
+                # Other error - also mark as failed but with different message
+                self.db.update_processing_status(
+                    question_internal_id,
+                    status='failed',
+                    lean_error=f"Lean conversion error: {error_msg}",
+                    processing_completed_at=self._now()
+                )
+                raise
+
+    def _convert_question_to_lean(self, title: str, body: str) -> str:
         """
-        Format problem for Lean conversion.
+        Convert a question to Lean 4 theorem/definition.
 
         Args:
             title: Question title
             body: Question body
-            answer: Optional answer
 
         Returns:
-            Formatted problem text
+            Lean 4 code for the question
         """
-        problem = f"Problem: {title}\n\n{body}"
-        if answer:
-            problem += f"\n\nSolution: {answer}"
-        return problem
+        problem_text = f"Problem: {title}\n\n{body}"
+
+        prompt = f"""Convert the following mathematical problem statement to a Lean 4 theorem or definition.
+Focus on formalizing the mathematical statement itself.
+
+{problem_text}
+
+Provide the Lean 4 code with appropriate imports and structure."""
+
+        lean_code = self.client.convert_to_lean(
+            problem_text=prompt,
+            max_tokens=2048,
+            temperature=0.6
+        )
+
+        return lean_code
+
+    def _convert_answer_to_lean(self, answer: str) -> str:
+        """
+        Convert an answer/solution to Lean 4 proof.
+
+        Args:
+            answer: Answer text
+
+        Returns:
+            Lean 4 code for the proof
+        """
+        prompt = f"""Convert the following mathematical solution or proof to Lean 4.
+This should be a proof that can be used with the corresponding theorem.
+
+Solution/Proof:
+{answer}
+
+Provide the Lean 4 proof code with appropriate structure."""
+
+        lean_code = self.client.convert_to_lean(
+            problem_text=prompt,
+            max_tokens=2048,
+            temperature=0.6
+        )
+
+        return lean_code
+
+    def _combine_lean_code(self, question_lean: str, answer_lean: str = None) -> str:
+        """
+        Combine question and answer Lean code into a complete formalization.
+
+        Args:
+            question_lean: Lean code for question (theorem/definition)
+            answer_lean: Lean code for answer (proof), if available
+
+        Returns:
+            Combined Lean 4 code
+        """
+        if answer_lean:
+            # Combine question and answer
+            combined = f"{question_lean}\n\n{answer_lean}"
+        else:
+            # Question only
+            combined = question_lean
+
+        return combined
+
+    def _is_program_error(self, error_msg: str) -> bool:
+        """
+        Determine if an error is a program error (retryable) or content error.
+
+        Program errors:
+        - VLLM server errors (timeout, connection, 500)
+        - GPU errors
+        - Model loading errors
+
+        Args:
+            error_msg: Error message string
+
+        Returns:
+            True if program error, False otherwise
+        """
+        program_error_keywords = [
+            'timeout',
+            'connection',
+            'network',
+            'VLLM',
+            'vllm',
+            'GPU',
+            'CUDA',
+            'OOM',
+            'out of memory',
+            '500',
+            '502',
+            '503',
+            '504'
+        ]
+
+        error_msg_lower = error_msg.lower()
+        return any(keyword.lower() in error_msg_lower for keyword in program_error_keywords)
 
     def _now(self) -> str:
         """Get current timestamp."""
