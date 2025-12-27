@@ -147,8 +147,10 @@
             <h4>Question</h4>
             <div class="content">{{ selectedQuestion.body }}</div>
 
+            <el-divider style="margin: 1.5rem 0;" />
+
+            <h4>Answers</h4>
             <div v-if="selectedQuestion.answers && selectedQuestion.answers.length > 0">
-              <h4 style="margin-top: 1rem;">Answers ({{ selectedQuestion.answers.length }})</h4>
               <div v-for="(answer, index) in sortedAnswers" :key="answer.id" class="answer">
                 <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 0.5rem;">
                   <el-tag v-if="answer.is_accepted" type="success" size="small">✓ Accepted</el-tag>
@@ -157,6 +159,9 @@
                 </div>
                 <div class="content">{{ answer.body }}</div>
               </div>
+            </div>
+            <div v-else class="content" style="color: #999; font-style: italic;">
+              No answers for this question
             </div>
           </el-tab-pane>
 

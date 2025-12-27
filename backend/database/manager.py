@@ -275,7 +275,10 @@ class DatabaseManager:
                     'status': ps.status if ps else 'raw',
                     'ocr_completed': ps.ocr_completed if ps else False,
                     'preprocessed_body': ps.preprocessed_body if ps else None,
+                    'preprocessed_answer': ps.preprocessed_answer if ps else None,
+                    'correction_notes': ps.correction_notes if ps else None,
                     'lean_code': ps.lean_code if ps else None,
+                    'lean_error': ps.lean_error if ps else None,
                 } if ps else None,
                 'images': [
                     {
