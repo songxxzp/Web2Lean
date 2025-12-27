@@ -47,6 +47,9 @@ def backfill_answers(site_name='math_stackexchange', batch_size=10, delay=1.0):
         db_manager=db
     )
 
+    # Override answer filter to ensure body is included
+    crawler.answer_filter = '!*S4CeCUIRL)Y'  # Filter that includes answer body
+
     # Get all internal question IDs
     session = db.get_session()
     try:

@@ -32,9 +32,11 @@ class StackExchangeCrawler(BaseCrawler):
         self.api_key = None  # Add API key if available for higher rate limits
         # Get site parameter from config (default to 'math' for backward compatibility)
         self.site_param = self.config.get('site_param', 'math')
-        # Use a valid filter that includes body and answers
-        # Filter: !9_bDDxJY5 includes body, answers, comments
-        self.filter = '!9_bDDxJY5'
+        # Use filters that include body for both questions and answers
+        # Filter for questions: includes body, answer count, etc.
+        self.filter = '!*1SgQGNVK)Y'  # Includes question body and metadata
+        # Filter for answers: includes answer body
+        self.answer_filter = '!*S4CeCUIRL)Y'  # Includes answer body
         # Starting page for crawling (default: 1)
         self.start_page = self.config.get('start_page', 1)
         # Stop strategy: 'pages' (limit by pages_per_run) or 'questions' (limit by new_questions_count)
@@ -141,7 +143,7 @@ class StackExchangeCrawler(BaseCrawler):
             'order': 'desc',
             'sort': 'votes',
             'site': self.site_param,
-            'filter': '!9_bDDxJY5',  # Include body
+            'filter': self.answer_filter,  # Use answer-specific filter with body
             'key': self.api_key
         }
 
