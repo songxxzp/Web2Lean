@@ -167,8 +167,10 @@
 
           <!-- Preprocessed Content -->
           <el-tab-pane label="Preprocessed" name="preprocessed">
-            <!-- Show error if preprocessing failed -->
-            <div v-if="selectedQuestion.processing_status?.preprocessing_error">
+            <!-- Show preprocessing error if failed at preprocessing stage -->
+            <div v-if="selectedQuestion.processing_status?.preprocessing_error &&
+                        (selectedQuestion.processing_status.status === 'failed' ||
+                         selectedQuestion.processing_status.status === 'cant_convert')">
               <el-alert type="error" :closable="false">
                 <strong>Preprocessing Failed:</strong>
                 <div style="margin-top: 0.5rem; white-space: pre-wrap;">{{ selectedQuestion.processing_status.preprocessing_error }}</div>
@@ -206,6 +208,14 @@
 
           <!-- Lean Code -->
           <el-tab-pane label="Lean Code" name="lean">
+            <!-- Show Lean conversion error first -->
+            <div v-if="selectedQuestion.processing_status?.lean_error" style="margin-bottom: 1rem;">
+              <el-alert type="error" :closable="false">
+                <strong>Lean Conversion Failed:</strong>
+                <div style="margin-top: 0.5rem; white-space: pre-wrap;">{{ selectedQuestion.processing_status.lean_error }}</div>
+              </el-alert>
+            </div>
+
             <!-- Show Lean code split into question and answer -->
             <div v-if="selectedQuestion.processing_status?.question_lean_code || selectedQuestion.processing_status?.lean_code">
               <!-- Question Lean Code -->
@@ -229,15 +239,7 @@
             </div>
 
             <!-- Not converted yet -->
-            <div v-else class="content">Not converted yet</div>
-
-            <!-- Conversion Error -->
-            <div v-if="selectedQuestion.processing_status?.lean_error" style="margin-top: 1rem;">
-              <el-alert type="error" :closable="false">
-                <strong>Conversion Error:</strong>
-                <div style="margin-top: 0.5rem; white-space: pre-wrap;">{{ selectedQuestion.processing_status.lean_error }}</div>
-              </el-alert>
-            </div>
+            <div v-else-if="!selectedQuestion.processing_status?.lean_error" class="content">Not converted yet</div>
           </el-tab-pane>
         </el-tabs>
       </div>
