@@ -25,8 +25,10 @@ class StackExchangeCrawler(BaseCrawler):
     - etc.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, api_base: str = None, **kwargs):
         super().__init__(*args, **kwargs)
+        # API base URL (either passed as arg or from config)
+        self.api_base = api_base or self.config.get('api_base', 'https://api.stackexchange.com/2.3')
         self.api_key = None  # Add API key if available for higher rate limits
         # Get site parameter from config (default to 'math' for backward compatibility)
         self.site_param = self.config.get('site_param', 'math')
