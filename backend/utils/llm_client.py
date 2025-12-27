@@ -303,96 +303,6 @@ Respond in JSON format only (no additional text):
             # Raise error with more details
             raise ValueError(f"Could not parse LLM response as JSON: {e}\nRaw response: {content[:800]}")
 
-
-class VLLMClient:
-    """Client for VLLM OpenAI-compatible API (for Kimina-Autoformalizer-7B)."""
-
-    def __init__(self, base_url: str = None, model_path: str = None):
-        """
-        Initialize VLLM client.
-
-        Args:
-            base_url: VLLM server base URL
-            model_path: Model path/name
-        """
-        self.base_url = base_url or "http://localhost:8000/v1"
-        self.model_path = model_path or "/root/Kimina-Autoformalizer-7B"
-
-    def chat_completion(
-        self,
-        messages: List[Dict[str, str]],
-        max_tokens: int = 2048,
-        temperature: float = 0.6,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """
-        Send chat completion request.
-
-        Args:
-            messages: List of message dicts
-            max_tokens: Maximum tokens to generate
-            temperature: Sampling temperature
-            **kwargs: Additional parameters
-
-        Returns:
-            Response JSON
-        """
-        import requests
-
-        url = f"{self.base_url}/chat/completions"
-
-        payload = {
-            "model": self.model_path,
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            **kwargs
-        }
-
-        try:
-            response = requests.post(url, json=payload, timeout=300)
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.HTTPError as e:
-            print(f"VLLM API HTTP error: {e}")
-            raise
-        except Exception as e:
-            print(f"VLLM API error: {e}")
-            raise
-
-    def convert_to_lean(
-        self,
-        problem_text: str,
-        max_tokens: int = 2048,
-        temperature: float = 0.6
-    ) -> str:
-        """
-        Convert mathematical problem to Lean 4.
-
-        Args:
-            problem_text: Problem description
-            max_tokens: Maximum tokens
-            temperature: Sampling temperature
-
-        Returns:
-            Lean 4 code
-        """
-        system_prompt = "You are an expert in mathematics and Lean 4."
-        user_prompt = f"Please autoformalize the following problem in Lean 4 with a header.\n\n{problem_text}"
-
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-
-        response = self.chat_completion(
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature
-        )
-
-        return response["choices"][0]["message"]["content"]
-
     def validate_and_select_answer(
         self,
         question: str,
@@ -664,3 +574,93 @@ Respond in JSON format only (no additional text):
 
         except (json.JSONDecodeError, ValueError) as e:
             raise ValueError(f"Could not parse LLM response as JSON: {e}\nRaw response: {content[:800]}")
+
+
+class VLLMClient:
+    """Client for VLLM OpenAI-compatible API (for Kimina-Autoformalizer-7B)."""
+
+    def __init__(self, base_url: str = None, model_path: str = None):
+        """
+        Initialize VLLM client.
+
+        Args:
+            base_url: VLLM server base URL
+            model_path: Model path/name
+        """
+        self.base_url = base_url or "http://localhost:8000/v1"
+        self.model_path = model_path or "/root/Kimina-Autoformalizer-7B"
+
+    def chat_completion(
+        self,
+        messages: List[Dict[str, str]],
+        max_tokens: int = 2048,
+        temperature: float = 0.6,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Send chat completion request.
+
+        Args:
+            messages: List of message dicts
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            **kwargs: Additional parameters
+
+        Returns:
+            Response JSON
+        """
+        import requests
+
+        url = f"{self.base_url}/chat/completions"
+
+        payload = {
+            "model": self.model_path,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            **kwargs
+        }
+
+        try:
+            response = requests.post(url, json=payload, timeout=300)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.HTTPError as e:
+            print(f"VLLM API HTTP error: {e}")
+            raise
+        except Exception as e:
+            print(f"VLLM API error: {e}")
+            raise
+
+    def convert_to_lean(
+        self,
+        problem_text: str,
+        max_tokens: int = 2048,
+        temperature: float = 0.6
+    ) -> str:
+        """
+        Convert mathematical problem to Lean 4.
+
+        Args:
+            problem_text: Problem description
+            max_tokens: Maximum tokens
+            temperature: Sampling temperature
+
+        Returns:
+            Lean 4 code
+        """
+        system_prompt = "You are an expert in mathematics and Lean 4."
+        user_prompt = f"Please autoformalize the following problem in Lean 4 with a header.\n\n{problem_text}"
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+
+        response = self.chat_completion(
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature
+        )
+
+        return response["choices"][0]["message"]["content"]
