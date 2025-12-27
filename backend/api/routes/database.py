@@ -13,7 +13,7 @@ def clear_data():
         return '', 200
 
     data = request.get_json() or {}
-    stage = data.get('stage')  # 'lean', 'preprocess', 'raw', or 'all'
+    stage = data.get('stage')  # 'lean', 'preprocess', 'failed', 'raw', or 'all'
 
     db = current_app.config['db']
     session = db.get_session()
@@ -46,6 +46,24 @@ def clear_data():
             }, synchronize_session=False)
             session.commit()
             return jsonify({'message': f'Cleared preprocessed data from {count} questions'})
+
+        elif stage == 'failed':
+            # Reset all failed questions to raw status
+            ps_query = session.query(ProcessingStatus).filter(
+                ProcessingStatus.status == 'failed'
+            )
+            count = ps_query.count()
+            ps_query.update({
+                ProcessingStatus.status: 'raw',
+                ProcessingStatus.preprocessed_body: None,
+                ProcessingStatus.preprocessed_answer: None,
+                ProcessingStatus.correction_notes: None,
+                ProcessingStatus.lean_code: None,
+                ProcessingStatus.lean_error: None,
+                ProcessingStatus.current_stage: None
+            }, synchronize_session=False)
+            session.commit()
+            return jsonify({'message': f'Reset {count} failed questions to raw status'})
 
         elif stage == 'raw':
             # Delete all raw questions and related data

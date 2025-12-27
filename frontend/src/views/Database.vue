@@ -15,6 +15,9 @@
           <el-button type="warning" @click="clearAll('preprocess')" :loading="clearing">
             Clear All Preprocessed
           </el-button>
+          <el-button type="primary" @click="clearAll('failed')" :loading="clearing">
+            Clear Failed
+          </el-button>
           <el-button type="info" @click="clearAll('raw')" :loading="clearing">
             Delete All Data
           </el-button>
@@ -236,12 +239,14 @@ async function clearAll(stage) {
   const titles = {
     lean: 'Clear All Lean Code',
     preprocess: 'Clear All Preprocessed Data',
+    failed: 'Clear All Failed Questions',
     raw: 'Delete All Data'
   }
 
   const warnings = {
     lean: 'This will remove all Lean code from all questions. Questions will revert to "preprocessed" status.',
     preprocess: 'This will remove all preprocessed data and Lean code. Questions will revert to "raw" status.',
+    failed: 'This will reset all failed questions to "raw" status, clearing all error data. You can retry processing them.',
     raw: 'This will DELETE ALL QUESTIONS from the database. This action cannot be undone!'
   }
 
