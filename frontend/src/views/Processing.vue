@@ -5,18 +5,42 @@
     <el-card class="actions-card">
       <el-row :gutter="20">
         <el-col :span="12">
-          <h3>Preprocessing (GLM-4)</h3>
+          <h3>Preprocessing (GLM-4.7)</h3>
           <p>Process raw questions through LLM validation and correction</p>
-          <el-button type="primary" @click="startPreprocessing" :loading="processing">
-            Start Preprocessing
-          </el-button>
+          <el-space>
+            <el-input-number
+              v-model="preprocessLimit"
+              :min="0"
+              :max="1000"
+              placeholder="0 for all"
+              style="width: 150px"
+            />
+            <el-button type="primary" @click="startPreprocessing" :loading="processing">
+              Start Preprocessing
+            </el-button>
+          </el-space>
+          <div style="margin-top: 8px; color: #909399; font-size: 12px;">
+            Set to 0 to process all raw questions
+          </div>
         </el-col>
         <el-col :span="12">
           <h3>Lean Conversion (Kimina)</h3>
           <p>Convert preprocessed questions to Lean 4</p>
-          <el-button type="success" @click="startLeanConversion" :loading="processing">
-            Start Lean Conversion
-          </el-button>
+          <el-space>
+            <el-input-number
+              v-model="leanLimit"
+              :min="0"
+              :max="1000"
+              placeholder="0 for all"
+              style="width: 150px"
+            />
+            <el-button type="success" @click="startLeanConversion" :loading="processing">
+              Start Lean Conversion
+            </el-button>
+          </el-space>
+          <div style="margin-top: 8px; color: #909399; font-size: 12px;">
+            Set to 0 to process all preprocessed questions
+          </div>
         </el-col>
       </el-row>
     </el-card>
@@ -53,6 +77,8 @@ import { statisticsApi, processingApi } from '@/api'
 const processing = ref(false)
 const queueStats = ref([])
 const totalQuestions = ref(0)
+const preprocessLimit = ref(10)  // Default 10
+const leanLimit = ref(10)  // Default 10
 
 async function loadStats() {
   try {
@@ -86,7 +112,8 @@ function getPercentage(status) {
 async function startPreprocessing() {
   processing.value = true
   try {
-    const result = await processingApi.preprocess({ limit: 10 })
+    const limit = preprocessLimit.value === 0 ? 10000 : preprocessLimit.value
+    const result = await processingApi.preprocess({ limit })
     ElMessage.success(result.message)
     await loadStats()
   } catch (error) {
@@ -99,7 +126,8 @@ async function startPreprocessing() {
 async function startLeanConversion() {
   processing.value = true
   try {
-    const result = await processingApi.startLean({ limit: 10 })
+    const limit = leanLimit.value === 0 ? 10000 : leanLimit.value
+    const result = await processingApi.startLean({ limit })
     ElMessage.success(result.message)
     await loadStats()
   } catch (error) {

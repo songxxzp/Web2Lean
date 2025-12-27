@@ -6,6 +6,148 @@ from flask import Blueprint, request, jsonify, current_app
 database_bp = Blueprint('database', __name__)
 
 
+@database_bp.route('/clear', methods=['POST', 'OPTIONS'])
+def clear_data():
+    """Clear data by stage or completely."""
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    data = request.get_json() or {}
+    stage = data.get('stage')  # 'lean', 'preprocess', 'raw', or 'all'
+
+    db = current_app.config['db']
+    session = db.get_session()
+
+    try:
+        from backend.database.schema import ProcessingStatus, Question, Answer, Image
+
+        if stage == 'lean':
+            # Clear all lean_code
+            count = session.query(ProcessingStatus).filter(
+                ProcessingStatus.lean_code.isnot(None)
+            ).update({ProcessingStatus.lean_code: None, ProcessingStatus.status: 'preprocessed'})
+            session.commit()
+            return jsonify({'message': f'Cleared lean code from {count} questions'})
+
+        elif stage == 'preprocess':
+            # Clear preprocessed data and lean code
+            ps_query = session.query(ProcessingStatus).filter(
+                ProcessingStatus.status.in_(['preprocessed', 'lean_converted'])
+            )
+            count = ps_query.count()
+            ps_query.update({
+                ProcessingStatus.status: 'raw',
+                ProcessingStatus.preprocessed_body: None,
+                ProcessingStatus.preprocessed_answer: None,
+                ProcessingStatus.correction_notes: None,
+                ProcessingStatus.lean_code: None,
+                ProcessingStatus.current_stage: None
+            }, synchronize_session=False)
+            session.commit()
+            return jsonify({'message': f'Cleared preprocessed data from {count} questions'})
+
+        elif stage == 'raw':
+            # Delete all raw questions and related data
+            # First get count
+            count = session.query(Question).count()
+
+            # Delete all processing status
+            session.query(ProcessingStatus).delete()
+
+            # Delete all images
+            session.query(Image).delete()
+
+            # Delete all answers
+            session.query(Answer).delete()
+
+            # Delete all questions
+            session.query(Question).delete()
+
+            session.commit()
+            return jsonify({'message': f'Deleted all {count} questions'})
+
+        else:
+            return jsonify({'error': 'Invalid stage'}), 400
+
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@database_bp.route('/questions/<int:question_id>/clear', methods=['POST', 'OPTIONS'])
+def clear_question_stage(question_id: int):
+    """Clear data from a specific stage for a question."""
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    data = request.get_json() or {}
+    stage = data.get('stage')  # 'lean', 'preprocess', 'raw'
+
+    db = current_app.config['db']
+    session = db.get_session()
+
+    try:
+        from backend.database.schema import ProcessingStatus, Question, Answer, Image
+
+        # Get question
+        question = session.query(Question).filter(Question.id == question_id).first()
+        if not question:
+            return jsonify({'error': 'Question not found'}), 404
+
+        if stage == 'lean':
+            # Clear lean code only
+            ps = session.query(ProcessingStatus).filter(
+                ProcessingStatus.question_id == question_id
+            ).first()
+            if ps:
+                ps.lean_code = None
+                if ps.status == 'lean_converted':
+                    ps.status = 'preprocessed'
+            session.commit()
+            return jsonify({'message': 'Cleared lean code'})
+
+        elif stage == 'preprocess':
+            # Clear preprocessed data and lean code
+            ps = session.query(ProcessingStatus).filter(
+                ProcessingStatus.question_id == question_id
+            ).first()
+            if ps:
+                ps.preprocessed_body = None
+                ps.preprocessed_answer = None
+                ps.correction_notes = None
+                ps.lean_code = None
+                ps.status = 'raw'
+                ps.current_stage = None
+            session.commit()
+            return jsonify({'message': 'Cleared preprocessed data'})
+
+        elif stage == 'raw':
+            # Delete entire question and related data
+            # Delete images
+            session.query(Image).filter(Image.question_id == question_id).delete()
+            # Delete answers
+            session.query(Answer).filter(Answer.question_id == question_id).delete()
+            # Delete processing status
+            session.query(ProcessingStatus).filter(
+                ProcessingStatus.question_id == question_id
+            ).delete()
+            # Delete question
+            session.query(Question).filter(Question.id == question_id).delete()
+            session.commit()
+            return jsonify({'message': 'Deleted question'})
+
+        else:
+            return jsonify({'error': 'Invalid stage'}), 400
+
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
 @database_bp.route('/questions', methods=['GET', 'OPTIONS'])
 def list_questions():
     """List questions with optional filters."""

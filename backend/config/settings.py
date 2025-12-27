@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any, Optional
 from dataclasses import dataclass, field
+from dotenv import load_dotenv
 
 
 @dataclass
@@ -67,6 +68,11 @@ class Settings:
 
     def _load_env(self):
         """Load settings from environment variables."""
+        # Load .env file from base directory
+        env_file = self.base_dir / '.env'
+        if env_file.exists():
+            load_dotenv(env_file)
+
         self.zhipu_api_key = os.getenv('ZHIPU_API_KEY', self.zhipu_api_key)
         self.api_port = int(os.getenv('API_PORT', self.api_port))
         self.api_debug = os.getenv('API_DEBUG', 'false').lower() == 'true'

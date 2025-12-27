@@ -109,7 +109,19 @@ export const databaseApi = {
     apiRequest(`/database/questions/${questionId}/images`),
 
   getStatistics: () =>
-    apiRequest('/database/statistics')
+    apiRequest('/database/statistics'),
+
+  clearData: (stage) =>
+    apiRequest('/database/clear', {
+      method: 'POST',
+      body: { stage }
+    }),
+
+  clearQuestionStage: (questionId, stage) =>
+    apiRequest(`/database/questions/${questionId}/clear`, {
+      method: 'POST',
+      body: { stage }
+    })
 }
 
 /**

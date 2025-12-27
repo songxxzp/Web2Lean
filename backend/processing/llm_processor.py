@@ -72,6 +72,10 @@ class LLMProcessor:
                 question.get('answers', [])
             )
 
+            # Validate response
+            if not corrected or not isinstance(corrected, dict):
+                raise ValueError(f"LLM returned invalid response: {corrected}")
+
             logger.info(f"LLM completed for question {question_internal_id}: has_errors={corrected.get('has_errors')}")
 
             # Update processing status

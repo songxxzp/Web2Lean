@@ -2,6 +2,26 @@
   <div class="database">
     <h2>Database Viewer</h2>
 
+    <!-- Bulk Clear Actions -->
+    <el-alert type="warning" :closable="false" style="margin-bottom: 1rem">
+      <template #title>
+        <strong>Bulk Data Management</strong>
+      </template>
+      <div style="margin-top: 10px;">
+        <el-button-group>
+          <el-button type="danger" @click="clearAll('lean')" :loading="clearing">
+            Clear All Lean Code
+          </el-button>
+          <el-button type="warning" @click="clearAll('preprocess')" :loading="clearing">
+            Clear All Preprocessed
+          </el-button>
+          <el-button type="info" @click="clearAll('raw')" :loading="clearing">
+            Delete All Data
+          </el-button>
+        </el-button-group>
+      </div>
+    </el-alert>
+
     <el-form :inline="true" class="filter-form">
       <el-form-item label="Site">
         <el-select v-model="filters.site_id" placeholder="All Sites" clearable>
@@ -38,6 +58,35 @@
           </el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="Actions" width="180" fixed="right">
+        <template #default="{ row }">
+          <el-button-group size="small">
+            <el-button
+              v-if="row.processing_status?.lean_code"
+              type="danger"
+              size="small"
+              @click.stop="clearQuestionStage(row.id, 'lean')"
+            >
+              Clear Lean
+            </el-button>
+            <el-button
+              v-if="row.processing_status?.preprocessed_body || row.processing_status?.lean_code"
+              type="warning"
+              size="small"
+              @click.stop="clearQuestionStage(row.id, 'preprocess')"
+            >
+              Clear Prep
+            </el-button>
+            <el-button
+              type="info"
+              size="small"
+              @click.stop="clearQuestionStage(row.id, 'raw')"
+            >
+              Delete
+            </el-button>
+          </el-button-group>
+        </template>
+      </el-table-column>
     </el-table>
 
     <el-pagination
@@ -51,6 +100,34 @@
     <!-- Question Detail Dialog -->
     <el-dialog v-model="detailVisible" title="Question Detail" width="70%">
       <div v-if="selectedQuestion">
+        <div style="margin-bottom: 1rem;">
+          <el-button-group>
+            <el-button
+              v-if="selectedQuestion.processing_status?.lean_code"
+              type="danger"
+              size="small"
+              @click="clearQuestionStage(selectedQuestion.id, 'lean')"
+            >
+              Clear Lean Code
+            </el-button>
+            <el-button
+              v-if="selectedQuestion.processing_status?.preprocessed_body || selectedQuestion.processing_status?.lean_code"
+              type="warning"
+              size="small"
+              @click="clearQuestionStage(selectedQuestion.id, 'preprocess')"
+            >
+              Clear Preprocessed
+            </el-button>
+            <el-button
+              type="info"
+              size="small"
+              @click="clearQuestionStage(selectedQuestion.id, 'raw')"
+            >
+              Delete Question
+            </el-button>
+          </el-button-group>
+        </div>
+
         <h3>{{ selectedQuestion.title }}</h3>
         <el-descriptions :column="2" border>
           <el-descriptions-item label="ID">{{ selectedQuestion.id }}</el-descriptions-item>
@@ -87,7 +164,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { databaseApi, configApi } from '@/api'
 
 const filters = ref({
@@ -106,6 +183,7 @@ const sites = ref([])
 const detailVisible = ref(false)
 const selectedQuestion = ref(null)
 const activeTab = ref('original')
+const clearing = ref(false)
 
 async function loadSites() {
   try {
@@ -152,6 +230,82 @@ function getStatusType(status) {
     failed: 'danger'
   }
   return types[status] || 'info'
+}
+
+async function clearAll(stage) {
+  const titles = {
+    lean: 'Clear All Lean Code',
+    preprocess: 'Clear All Preprocessed Data',
+    raw: 'Delete All Data'
+  }
+
+  const warnings = {
+    lean: 'This will remove all Lean code from all questions. Questions will revert to "preprocessed" status.',
+    preprocess: 'This will remove all preprocessed data and Lean code. Questions will revert to "raw" status.',
+    raw: 'This will DELETE ALL QUESTIONS from the database. This action cannot be undone!'
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      warnings[stage],
+      titles[stage],
+      {
+        confirmButtonText: 'Confirm',
+        cancelButtonText: 'Cancel',
+        type: stage === 'raw' ? 'error' : 'warning'
+      }
+    )
+
+    clearing.value = true
+    const result = await databaseApi.clearData(stage)
+    ElMessage.success(result.message)
+    await loadQuestions()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error(error.message || 'Failed to clear data')
+    }
+  } finally {
+    clearing.value = false
+  }
+}
+
+async function clearQuestionStage(questionId, stage) {
+  const titles = {
+    lean: 'Clear Lean Code',
+    preprocess: 'Clear Preprocessed Data',
+    raw: 'Delete Question'
+  }
+
+  const warnings = {
+    lean: 'This will remove the Lean code from this question.',
+    preprocess: 'This will remove preprocessed data and Lean code from this question.',
+    raw: 'This will DELETE this question and all related data. This action cannot be undone!'
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      warnings[stage],
+      titles[stage],
+      {
+        confirmButtonText: 'Confirm',
+        cancelButtonText: 'Cancel',
+        type: stage === 'raw' ? 'error' : 'warning'
+      }
+    )
+
+    const result = await databaseApi.clearQuestionStage(questionId, stage)
+    ElMessage.success(result.message)
+
+    if (detailVisible.value && selectedQuestion.value?.id === questionId) {
+      detailVisible.value = false
+    }
+
+    await loadQuestions()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error(error.message || 'Failed to clear data')
+    }
+  }
 }
 
 onMounted(() => {

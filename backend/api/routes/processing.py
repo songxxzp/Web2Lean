@@ -3,6 +3,7 @@ Processing API endpoints.
 """
 from flask import Blueprint, request, jsonify, current_app
 import threading
+import time
 
 processing_bp = Blueprint('processing', __name__)
 
@@ -85,13 +86,35 @@ def start_preprocessing():
         )
 
         def process_questions():
-            for q in questions:
+            for i, q in enumerate(questions):
                 if site_id and q['site_id'] != site_id:
                     continue
-                try:
-                    processor.process_question(q['id'])
-                except Exception as e:
-                    print(f"Error preprocessing question {q['id']}: {e}")
+
+                # Add delay between requests to avoid rate limiting
+                if i > 0:
+                    time.sleep(2)  # Wait 2 seconds between requests
+
+                # Retry logic for rate limiting
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        processor.process_question(q['id'])
+                        break  # Success, move to next question
+                    except Exception as e:
+                        error_str = str(e)
+                        if '429' in error_str or 'Too Many Requests' in error_str:
+                            # Rate limited - wait and retry
+                            if attempt < max_retries - 1:
+                                wait_time = (attempt + 1) * 5  # Exponential backoff: 5s, 10s, 15s
+                                print(f"Rate limited on question {q['id']}, waiting {wait_time}s before retry {attempt + 1}/{max_retries}")
+                                time.sleep(wait_time)
+                                continue
+                            else:
+                                print(f"Error preprocessing question {q['id']}: Rate limited after {max_retries} retries")
+                        else:
+                            # Other errors - don't retry
+                            print(f"Error preprocessing question {q['id']}: {e}")
+                            break
 
         thread = threading.Thread(target=process_questions, daemon=True)
         thread.start()
