@@ -135,6 +135,11 @@
             <span style="margin-left: 10px; color: #999;">本地模型路径</span>
           </el-form-item>
 
+          <el-form-item label="Kimina URL">
+            <el-input v-model="models.kimina_url" placeholder="http://127.0.0.1:9000" />
+            <span style="margin-left: 10px; color: #999;">Lean验证服务器地址</span>
+          </el-form-item>
+
           <el-form-item>
             <el-button type="primary" @click="saveModels">Save Models</el-button>
             <el-button @click="loadModels">Reset</el-button>

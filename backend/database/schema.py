@@ -135,6 +135,17 @@ class ProcessingStatus(Base):
     answer_lean_code = Column(Text)  # Lean code for answer (proof)
     lean_code = Column(Text)  # Deprecated - kept for backward compatibility
     lean_error = Column(Text)
+
+    # Lean verification fields
+    verification_status = Column(Text)  # 'not_verified', 'verifying', 'passed', 'warning', 'failed', 'connection_error', 'error'
+    verification_has_errors = Column(Boolean, default=False)
+    verification_has_warnings = Column(Boolean, default=False)
+    verification_messages = Column(Text)  # JSON array of verification messages
+    verification_error = Column(Text)  # Error if verification failed
+    verification_time = Column(Float)  # Total verification time in seconds
+    verification_started_at = Column(Text)
+    verification_completed_at = Column(Text)
+
     processing_started_at = Column(Text)
     processing_completed_at = Column(Text)
     last_updated = Column(Text, default=lambda: datetime.now().isoformat(), onupdate=lambda: datetime.now().isoformat())

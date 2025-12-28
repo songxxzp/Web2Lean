@@ -10,7 +10,7 @@ from ..config import get_settings
 from ..database import DatabaseManager
 from .routes import (
     crawlers_bp, statistics_bp, processing_bp,
-    database_bp, config_bp
+    database_bp, config_bp, verification_bp
 )
 
 
@@ -49,6 +49,7 @@ def create_app(config_path: str = None) -> Flask:
     app.register_blueprint(processing_bp, url_prefix='/api/processing')
     app.register_blueprint(database_bp, url_prefix='/api/database')
     app.register_blueprint(config_bp, url_prefix='/api/config')
+    app.register_blueprint(verification_bp, url_prefix='/api/verification')
 
     # Root endpoint
     @app.route('/')

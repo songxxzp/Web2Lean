@@ -282,6 +282,12 @@ class DatabaseManager:
                     'answer_lean_code': ps.answer_lean_code if ps else None,
                     'lean_code': ps.lean_code if ps else None,  # Deprecated, for backward compatibility
                     'lean_error': ps.lean_error if ps else None,
+                    'verification_status': ps.verification_status if ps and ps.verification_status else 'not_verified',
+                    'verification_has_errors': ps.verification_has_errors if ps else False,
+                    'verification_has_warnings': ps.verification_has_warnings if ps else False,
+                    'verification_messages': json.loads(ps.verification_messages) if ps and ps.verification_messages else [],
+                    'verification_error': ps.verification_error if ps else None,
+                    'verification_time': ps.verification_time if ps else None,
                 } if ps else None,
                 'images': [
                     {
@@ -353,7 +359,12 @@ class DatabaseManager:
                     'score': q.score,
                     'answer_count': actual_answers,  # Use actual answer count from database
                     'status': ps.status if ps else 'raw',
+                    'verification_status': ps.verification_status if ps else None,
                     'crawled_at': q.crawled_at,
+                    'processing_status': {
+                        'status': ps.status if ps else 'raw',
+                        'verification_status': ps.verification_status if ps else None,
+                    }
                 }
                 for q, ps, actual_answers in results
             ]
@@ -389,6 +400,12 @@ class DatabaseManager:
                 ProcessingStatus.status == 'failed'
             ).scalar()
 
+            # Lean verified count (passed or warning)
+            lean_verified_count = session.query(func.count(ProcessingStatus.id)).filter(
+                ProcessingStatus.status == 'lean_converted',
+                ProcessingStatus.verification_status.in_(['passed', 'warning'])
+            ).scalar()
+
             # Per-site stats
             sites = self.get_sites()
             site_stats = []
@@ -414,6 +431,7 @@ class DatabaseManager:
                     'raw': raw_count or 0,
                     'preprocessed': preprocessed_count or 0,
                     'lean_converted': lean_converted_count or 0,
+                    'lean_verified': lean_verified_count or 0,
                     'failed': failed_count or 0,
                 },
                 'by_site': site_stats,

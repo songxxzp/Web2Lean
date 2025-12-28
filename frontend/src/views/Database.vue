@@ -12,6 +12,9 @@
           <el-button type="danger" @click="clearAll('lean')" :loading="clearing">
             Clear All Lean Code
           </el-button>
+          <el-button type="success" @click="clearAll('verification')" :loading="clearing">
+            Clear All Verification Status
+          </el-button>
           <el-button type="warning" @click="clearAll('preprocess')" :loading="clearing">
             Clear All Preprocessed
           </el-button>
@@ -62,6 +65,14 @@
           </el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="Verification" width="150">
+        <template #default="{ row }">
+          <el-tag v-if="getVerificationStatus(row)" :type="getVerificationStatusType(getVerificationStatus(row))">
+            {{ getVerificationStatusLabel(getVerificationStatus(row)) }}
+          </el-tag>
+          <span v-else style="color: #999;">-</span>
+        </template>
+      </el-table-column>
       <el-table-column label="Actions" width="180" fixed="right">
         <template #default="{ row }">
           <el-button-group size="small">
@@ -106,6 +117,15 @@
       <div v-if="selectedQuestion">
         <div style="margin-bottom: 1rem;">
           <el-button-group>
+            <el-button
+              v-if="selectedQuestion.processing_status?.question_lean_code || selectedQuestion.processing_status?.lean_code"
+              type="success"
+              size="small"
+              @click="verifyQuestion(selectedQuestion.id)"
+              :loading="verifying"
+            >
+              Verify Lean
+            </el-button>
             <el-button
               v-if="selectedQuestion.processing_status?.lean_code"
               type="danger"
@@ -208,6 +228,29 @@
 
           <!-- Lean Code -->
           <el-tab-pane label="Lean Code" name="lean">
+            <!-- Show verification status -->
+            <div v-if="selectedQuestion.processing_status?.verification_status && selectedQuestion.processing_status.verification_status !== 'not_verified'" style="margin-bottom: 1rem;">
+              <el-alert
+                :type="getVerificationStatusType(selectedQuestion.processing_status.verification_status)"
+                :closable="false"
+              >
+                <template #title>
+                  <strong>Verification Status: {{ selectedQuestion.processing_status.verification_status }}</strong>
+                </template>
+                <div v-if="selectedQuestion.processing_status.verification_time" style="margin-top: 0.5rem;">
+                  Time: {{ selectedQuestion.processing_status.verification_time.toFixed(3) }}s
+                </div>
+                <!-- Show verification messages if any -->
+                <div v-if="selectedQuestion.processing_status.verification_messages && selectedQuestion.processing_status.verification_messages.length > 0" style="margin-top: 0.5rem;">
+                  <div v-for="(msg, idx) in selectedQuestion.processing_status.verification_messages" :key="idx" style="margin-top: 0.25rem;">
+                    <el-tag :type="msg.severity === 'error' ? 'danger' : msg.severity === 'warning' ? 'warning' : 'info'" size="small">
+                      Line {{ msg.line }}: {{ msg.message }}
+                    </el-tag>
+                  </div>
+                </div>
+              </el-alert>
+            </div>
+
             <!-- Show Lean conversion error first -->
             <div v-if="selectedQuestion.processing_status?.lean_error" style="margin-bottom: 1rem;">
               <el-alert type="error" :closable="false">
@@ -250,7 +293,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { databaseApi, configApi } from '@/api'
+import { databaseApi, configApi, verificationApi } from '@/api'
 
 const filters = ref({
   site_id: null,
@@ -269,6 +312,7 @@ const detailVisible = ref(false)
 const selectedQuestion = ref(null)
 const activeTab = ref('raw')
 const clearing = ref(false)
+const verifying = ref(false)
 
 // Sort answers: accepted first, then by score
 const sortedAnswers = computed(() => {
@@ -329,9 +373,28 @@ function getStatusType(status) {
   return types[status] || 'info'
 }
 
+function getVerificationStatus(row) {
+  // Get verification status from processing_status
+  return row.processing_status?.verification_status || null
+}
+
+function getVerificationStatusLabel(status) {
+  const labels = {
+    'not_verified': 'Not Verified',
+    'verifying': 'Verifying',
+    'passed': 'Passed',
+    'warning': 'Warning',
+    'failed': 'Failed',
+    'connection_error': 'Conn Error',
+    'error': 'Error'
+  }
+  return labels[status] || status
+}
+
 async function clearAll(stage) {
   const titles = {
     lean: 'Clear All Lean Code',
+    verification: 'Clear All Verification Status',
     preprocess: 'Clear All Preprocessed Data',
     failed: 'Clear All Failed Questions',
     raw: 'Delete All Data'
@@ -339,6 +402,7 @@ async function clearAll(stage) {
 
   const warnings = {
     lean: 'This will remove all Lean code from all questions. Questions will revert to "preprocessed" status.',
+    verification: 'This will remove all verification status but keep Lean code. You can re-verify questions.',
     preprocess: 'This will remove all preprocessed data and Lean code. Questions will revert to "raw" status.',
     failed: 'This will reset all failed questions to "raw" status, clearing all error data. You can retry processing them.',
     raw: 'This will DELETE ALL QUESTIONS from the database. This action cannot be undone!'
@@ -405,6 +469,43 @@ async function clearQuestionStage(questionId, stage) {
       ElMessage.error(error.message || 'Failed to clear data')
     }
   }
+}
+
+async function verifyQuestion(questionId) {
+  verifying.value = true
+  try {
+    const result = await verificationApi.verify(questionId)
+
+    if (result.verification_status === 'passed') {
+      ElMessage.success(`Verification passed in ${result.total_time.toFixed(2)}s`)
+    } else if (result.verification_status === 'warning') {
+      ElMessage.warning(`Verification passed with ${result.message_count} warnings in ${result.total_time.toFixed(2)}s`)
+    } else if (result.verification_status === 'failed') {
+      ElMessage.error(`Verification failed: ${result.message_count} errors`)
+    } else if (result.verification_status === 'connection_error') {
+      ElMessage.error('Failed to connect to kimina-lean-server')
+    }
+
+    // Reload question data
+    selectedQuestion.value = await databaseApi.getQuestion(questionId)
+  } catch (error) {
+    ElMessage.error(error.message || 'Verification failed')
+  } finally {
+    verifying.value = false
+  }
+}
+
+function getVerificationStatusType(status) {
+  const types = {
+    'not_verified': 'info',
+    'verifying': 'warning',
+    'passed': 'success',
+    'warning': 'warning',
+    'failed': 'danger',
+    'connection_error': 'danger',
+    'error': 'danger'
+  }
+  return types[status] || 'info'
 }
 
 onMounted(() => {

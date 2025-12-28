@@ -13,7 +13,7 @@ def clear_data():
         return '', 200
 
     data = request.get_json() or {}
-    stage = data.get('stage')  # 'lean', 'preprocess', 'failed', 'raw', or 'all'
+    stage = data.get('stage')  # 'lean', 'verification', 'preprocess', 'failed', 'raw', or 'all'
 
     db = current_app.config['db']
     session = db.get_session()
@@ -22,15 +22,41 @@ def clear_data():
         from backend.database.schema import ProcessingStatus, Question, Answer, Image
 
         if stage == 'lean':
-            # Clear all lean_code
+            # Clear all lean_code and verification status
             count = session.query(ProcessingStatus).filter(
                 ProcessingStatus.lean_code.isnot(None)
-            ).update({ProcessingStatus.lean_code: None, ProcessingStatus.status: 'preprocessed'})
+            ).update({
+                ProcessingStatus.lean_code: None,
+                ProcessingStatus.status: 'preprocessed',
+                ProcessingStatus.verification_status: None,
+                ProcessingStatus.verification_has_errors: None,
+                ProcessingStatus.verification_has_warnings: None,
+                ProcessingStatus.verification_messages: None,
+                ProcessingStatus.verification_error: None,
+                ProcessingStatus.verification_time: None,
+                ProcessingStatus.verification_completed_at: None
+            }, synchronize_session=False)
             session.commit()
             return jsonify({'message': f'Cleared lean code from {count} questions'})
 
+        elif stage == 'verification':
+            # Clear all verification status but keep lean code
+            count = session.query(ProcessingStatus).filter(
+                ProcessingStatus.verification_status.isnot(None)
+            ).update({
+                ProcessingStatus.verification_status: None,
+                ProcessingStatus.verification_has_errors: None,
+                ProcessingStatus.verification_has_warnings: None,
+                ProcessingStatus.verification_messages: None,
+                ProcessingStatus.verification_error: None,
+                ProcessingStatus.verification_time: None,
+                ProcessingStatus.verification_completed_at: None
+            }, synchronize_session=False)
+            session.commit()
+            return jsonify({'message': f'Cleared verification status from {count} questions'})
+
         elif stage == 'preprocess':
-            # Clear preprocessed data, lean code, and failed/cant_convert status
+            # Clear preprocessed data, lean code, verification status, and failed/cant_convert status
             ps_query = session.query(ProcessingStatus).filter(
                 ProcessingStatus.status.in_(['preprocessed', 'lean_converted', 'failed', 'cant_convert'])
             )
@@ -42,7 +68,14 @@ def clear_data():
                 ProcessingStatus.correction_notes: None,
                 ProcessingStatus.lean_code: None,
                 ProcessingStatus.lean_error: None,
-                ProcessingStatus.current_stage: None
+                ProcessingStatus.current_stage: None,
+                ProcessingStatus.verification_status: None,
+                ProcessingStatus.verification_has_errors: None,
+                ProcessingStatus.verification_has_warnings: None,
+                ProcessingStatus.verification_messages: None,
+                ProcessingStatus.verification_error: None,
+                ProcessingStatus.verification_time: None,
+                ProcessingStatus.verification_completed_at: None
             }, synchronize_session=False)
             session.commit()
             return jsonify({'message': f'Cleared preprocessed data from {count} questions'})
@@ -116,19 +149,26 @@ def clear_question_stage(question_id: int):
             return jsonify({'error': 'Question not found'}), 404
 
         if stage == 'lean':
-            # Clear lean code only
+            # Clear lean code and verification status
             ps = session.query(ProcessingStatus).filter(
                 ProcessingStatus.question_id == question_id
             ).first()
             if ps:
                 ps.lean_code = None
+                ps.verification_status = None
+                ps.verification_has_errors = None
+                ps.verification_has_warnings = None
+                ps.verification_messages = None
+                ps.verification_error = None
+                ps.verification_time = None
+                ps.verification_completed_at = None
                 if ps.status == 'lean_converted':
                     ps.status = 'preprocessed'
             session.commit()
             return jsonify({'message': 'Cleared lean code'})
 
         elif stage == 'preprocess':
-            # Clear preprocessed data, lean code, and failed/cant_convert status
+            # Clear preprocessed data, lean code, verification status, and failed/cant_convert status
             ps = session.query(ProcessingStatus).filter(
                 ProcessingStatus.question_id == question_id
             ).first()
@@ -138,6 +178,13 @@ def clear_question_stage(question_id: int):
                 ps.correction_notes = None
                 ps.lean_code = None
                 ps.lean_error = None
+                ps.verification_status = None
+                ps.verification_has_errors = None
+                ps.verification_has_warnings = None
+                ps.verification_messages = None
+                ps.verification_error = None
+                ps.verification_time = None
+                ps.verification_completed_at = None
                 # Reset to raw for preprocessed, lean_converted, failed, cant_convert
                 if ps.status in ['preprocessed', 'lean_converted', 'failed', 'cant_convert']:
                     ps.status = 'raw'

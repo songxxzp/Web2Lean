@@ -21,6 +21,7 @@ class Settings:
     zhipu_api_key: str = ''
     vllm_base_url: str = 'http://localhost:8000/v1'
     vllm_model_path: str = '/root/Kimina-Autoformalizer-7B'
+    kimina_url: str = 'http://127.0.0.1:9000'  # Lean verification server
 
     # LLM Models
     glm_text_model: str = 'glm-4.7'  # For text processing (new zai-sdk)
@@ -78,6 +79,7 @@ class Settings:
         self.api_debug = os.getenv('API_DEBUG', 'false').lower() == 'true'
         self.glm_text_model = os.getenv('GLM_TEXT_MODEL', self.glm_text_model)
         self.glm_vision_model = os.getenv('GLM_VISION_MODEL', self.glm_vision_model)
+        self.kimina_url = os.getenv('KIMINA_URL', self.kimina_url)
         # Handle "local" as empty string for Kimina model
         lean_model = os.getenv('GLM_LEAN_MODEL', self.glm_lean_model)
         self.glm_lean_model = '' if lean_model == 'local' else lean_model

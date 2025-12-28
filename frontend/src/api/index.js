@@ -195,10 +195,28 @@ export const configApi = {
     })
 }
 
+/**
+ * Verification API
+ */
+export const verificationApi = {
+  verify: (questionId) =>
+    apiRequest(`/verification/verify/${questionId}`, { method: 'POST' }),
+
+  verifyAll: (options = {}) =>
+    apiRequest('/verification/verify-all', {
+      method: 'POST',
+      body: options
+    }),
+
+  getStatus: (questionId) =>
+    apiRequest(`/verification/status/${questionId}`)
+}
+
 export default {
   crawlers: crawlersApi,
   statistics: statisticsApi,
   processing: processingApi,
   database: databaseApi,
-  config: configApi
+  config: configApi,
+  verification: verificationApi
 }

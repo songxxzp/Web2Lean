@@ -10,11 +10,13 @@ from .statistics import statistics_bp
 from .processing import processing_bp
 from .database import database_bp
 from .config import config_bp
+from .verification import verification_bp
 
 __all__ = [
     'crawlers_bp',
     'statistics_bp',
     'processing_bp',
     'database_bp',
-    'config_bp'
+    'config_bp',
+    'verification_bp'
 ]
