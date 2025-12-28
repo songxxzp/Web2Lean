@@ -61,7 +61,7 @@
       <el-table-column prop="title" label="Title" show-overflow-tooltip />
       <el-table-column label="Theorem Name" width="180">
         <template #default="{ row }">
-          <span v-if="row.processing_status?.theorem_name" style="font-family: monospace; color: #409eff;">
+          <span v-if="row.processing_status?.theorem_name" class="theorem-name">
             {{ row.processing_status.theorem_name }}
           </span>
           <span v-else style="color: #999;">-</span>
@@ -123,6 +123,20 @@
       @current-change="handlePageChange"
     />
 
+    <div style="margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+      <span style="color: #606266;">Go to page:</span>
+      <el-input-number
+        v-model="jumpPage"
+        :min="1"
+        :max="maxPages"
+        :controls="false"
+        style="width: 120px;"
+        size="small"
+      />
+      <el-button type="primary" size="small" @click="jumpToPage">Go</el-button>
+      <span style="color: #909399; font-size: 12px;">(Total: {{ maxPages }} pages)</span>
+    </div>
+
     <!-- Question Detail Dialog -->
     <el-dialog v-model="detailVisible" :title="selectedQuestion?.title || 'Question Detail'" width="80%">
       <div v-if="selectedQuestion">
@@ -167,7 +181,7 @@
           <el-descriptions-item label="ID">{{ selectedQuestion.id }}</el-descriptions-item>
           <el-descriptions-item label="Score">{{ selectedQuestion.score }}</el-descriptions-item>
           <el-descriptions-item label="Theorem Name">
-            <span v-if="selectedQuestion.processing_status?.theorem_name" style="font-family: monospace; color: #409eff;">
+            <span v-if="selectedQuestion.processing_status?.theorem_name" class="theorem-name">
               {{ selectedQuestion.processing_status.theorem_name }}
             </span>
             <span v-else style="color: #999;">Not generated</span>
@@ -323,6 +337,14 @@ const pagination = ref({
   total: 0
 })
 
+const jumpPage = ref(1)
+
+// Computed max pages to avoid min > max error
+const maxPages = computed(() => {
+  const totalPages = Math.ceil(pagination.value.total / pagination.value.pageSize)
+  return totalPages > 0 ? totalPages : 1
+})
+
 const questions = ref([])
 const sites = ref([])
 const detailVisible = ref(false)
@@ -367,6 +389,17 @@ async function loadQuestions() {
 
 function handlePageChange(newPage) {
   pagination.value.page = newPage
+  jumpPage.value = newPage
+  loadQuestions()
+}
+
+function jumpToPage() {
+  if (jumpPage.value < 1) {
+    jumpPage.value = 1
+  } else if (jumpPage.value > maxPages.value) {
+    jumpPage.value = maxPages.value
+  }
+  pagination.value.page = jumpPage.value
   loadQuestions()
 }
 
@@ -547,6 +580,17 @@ onMounted(() => {
 <style scoped>
 .filter-form {
   margin-bottom: 1rem;
+}
+
+.theorem-name {
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', 'Droid Sans Mono', 'Source Code Pro', monospace;
+  color: #409eff;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+  max-width: 100%;
 }
 
 .content {

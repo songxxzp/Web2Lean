@@ -100,6 +100,8 @@
             <el-select v-model="models.glm_text_model" filterable allow-create style="width: 300px">
               <el-option label="GLM-4.7 (最新推荐)" value="glm-4.7" />
               <el-option label="GLM-4-Plus" value="glm-4-plus" />
+              <el-option label="GLM-4.6" value="glm-4.6" />
+              <el-option label="GLM-4.5" value="glm-4.5" />
               <el-option label="GLM-4" value="glm-4" />
             </el-select>
             <span style="margin-left: 10px; color: #999;">用于文本预处理和验证</span>
