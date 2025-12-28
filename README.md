@@ -7,6 +7,7 @@ A comprehensive platform for crawling mathematical Q&A websites and automaticall
 - **Multi-Site Crawling**: Support for Math StackExchange, MathOverflow, AMM, and custom sites
 - **LLM Preprocessing**: GLM-4V for image OCR, GLM-4 for content validation and correction
 - **Lean Formalization**: Automatic conversion to Lean 4 using Kimina-Autoformalizer-7B
+- **Lean Verification**: Verify Lean code against kimina-lean-server for correctness
 - **Web Control Platform**: Full-featured Vue 3 frontend for monitoring and control
 - **Scheduled Tasks**: APScheduler-based automation for crawling and processing
 
@@ -60,13 +61,22 @@ Or use the built-in command:
 python main.py --vllm-start
 ```
 
-### 4. Initialize Database
+### 4. Start kimina-lean-server (for Lean verification)
+
+The verification feature requires kimina-lean-server running:
+
+```bash
+# Default: http://127.0.0.1:9000
+# Configure in backend/config/settings.py if different
+```
+
+### 5. Initialize Database
 
 ```bash
 python main.py --init-db
 ```
 
-### 5. Start the Backend API
+### 6. Start the Backend API
 
 ```bash
 python main.py
@@ -74,7 +84,7 @@ python main.py
 
 API will be available at `http://localhost:5000`
 
-### 6. Start the Frontend
+### 7. Start the Frontend
 
 ```bash
 cd frontend
@@ -89,8 +99,15 @@ Frontend will be available at `http://localhost:3000`
 
 1. Open `http://localhost:3000`
 2. Navigate to **Crawlers** to start/stop site crawlers
-3. Navigate to **Processing** to trigger LLM preprocessing and Lean conversion
-4. Navigate to **Database** to browse and view processed content
+3. Navigate to **Processing** to:
+   - Trigger LLM preprocessing
+   - Start Lean conversion
+   - Verify converted Lean code
+4. Navigate to **Database** to:
+   - Browse and view processed content
+   - View Lean code split into question (theorem declaration) and answer (complete theorem)
+   - Check verification status
+   - Clear data by stage (lean code, verification status, etc.)
 5. Navigate to **Configuration** to manage sites, prompts, and scheduled tasks
 
 ### Via API
@@ -107,6 +124,13 @@ Example: Trigger Lean conversion
 curl -X POST http://localhost:5000/api/processing/start-lean \
   -H "Content-Type: application/json" \
   -d '{"limit": 10}'
+```
+
+Example: Verify all Lean-converted questions
+```bash
+curl -X POST http://localhost:5000/api/verification/verify-all \
+  -H "Content-Type: application/json" \
+  -d '{"limit": 100, "async": true}'
 ```
 
 ## Configuration
@@ -142,6 +166,9 @@ Edit `backend/config/prompts.json` to customize LLM behavior:
 3. **Preprocessing (GLM-4)**: Content validated and corrected
 4. **Deduplication** (interface only, not implemented)
 5. **Lean Conversion**: Kimina-Autoformalizer-7B generates Lean 4 code
+   - Question Lean Code: Theorem declaration
+   - Answer Lean Code: Complete theorem with proof
+6. **Lean Verification**: kimina-lean-server validates generated code
 
 ## API Endpoints
 
@@ -152,11 +179,28 @@ Edit `backend/config/prompts.json` to customize LLM behavior:
 | `/api/crawlers/status` | GET | Get all crawler statuses |
 | `/api/processing/start-lean` | POST | Start Lean conversion |
 | `/api/processing/preprocess` | POST | Start LLM preprocessing |
+| `/api/verification/verify/:id` | POST | Verify a single question's Lean code |
+| `/api/verification/verify-all` | POST | Batch verify all Lean-converted questions |
+| `/api/verification/status/:id` | GET | Get verification status for a question |
 | `/api/database/questions` | GET | List/search questions |
+| `/api/database/clear` | POST | Clear data by stage (lean/preprocess/verification) |
 | `/api/statistics/overview` | GET | Get overall statistics |
 | `/api/config/sites` | GET/POST | Manage site configurations |
 
 ## Development
+
+### Testing Lean Conversion
+
+Use the interactive test tool to test Lean conversion without going through the full pipeline:
+
+```bash
+python test_lean_converter.py
+```
+
+This allows you to:
+- Test question conversion (theorem declaration only)
+- Test answer conversion (complete theorem with proof)
+- Quickly iterate on prompts and see results
 
 ### Adding a New Crawler
 

@@ -35,13 +35,43 @@ class VerificationResult:
 
     @classmethod
     def from_kimina_response(cls, response_data: Dict) -> 'VerificationResult':
-        """Create VerificationResult from kimina-lean-server response."""
+        """Create VerificationResult from kimina-lean-server response.
+
+        Response format when verification passes:
+        {
+          "results": [{
+            "id": "...",
+            "time": 0.047723,
+            "response": {"env": 2}  # Only 'env' field means success, no errors/warnings
+          }]
+        }
+
+        Response format with errors/warnings:
+        {
+          "results": [{
+            "response": {
+              "env": 2,
+              "messages": [
+                {"severity": "error", "pos": {...}, "endPos": {...}, "data": "error message"}
+              ]
+            }
+          }]
+        }
+        """
         messages = []
         has_errors = False
         has_warnings = False
 
         for result in response_data.get('results', []):
             resp = result.get('response', {})
+
+            # If response only has 'env' field (e.g., {"env": 2}), verification passed
+            # No errors or warnings
+            if 'messages' not in resp:
+                logger.debug(f"Verification passed: response only contains 'env' field: {resp}")
+                continue
+
+            # Process messages if present
             for msg in resp.get('messages', []):
                 severity = msg.get('severity', 'info')
                 pos = msg.get('pos', {})
