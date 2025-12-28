@@ -464,6 +464,116 @@ class DatabaseManager:
         finally:
             session.close()
 
+    def get_detailed_site_statistics(self) -> List[Dict[str, Any]]:
+        """Get detailed statistics for each site including averages."""
+        session = self.get_session()
+        try:
+            sites = session.query(Site).all()
+            site_stats = []
+
+            for site in sites:
+                # Count questions and answers for this site
+                questions = session.query(Question).filter(Question.site_id == site.site_id).all()
+
+                if not questions:
+                    continue
+
+                total_questions = len(questions)
+                total_answers = session.query(func.count(Answer.id)).filter(
+                    Answer.site_id == site.site_id
+                ).scalar() or 0
+
+                # Calculate average question length
+                avg_question_length = session.query(func.avg(func.length(Question.body))).filter(
+                    Question.site_id == site.site_id
+                ).scalar() or 0
+
+                # Calculate average answer length
+                avg_answer_length = session.query(func.avg(func.length(Answer.body))).filter(
+                    Answer.site_id == site.site_id
+                ).scalar() or 0
+
+                site_stats.append({
+                    'site_id': site.site_id,
+                    'site_name': site.site_name,
+                    'total_questions': total_questions,
+                    'total_answers': total_answers,
+                    'avg_answers_per_question': round(total_answers / total_questions, 2) if total_questions > 0 else 0,
+                    'avg_question_length': round(float(avg_question_length), 2),
+                    'avg_answer_length': round(float(avg_answer_length), 2),
+                })
+
+            return site_stats
+        finally:
+            session.close()
+
+    def get_preprocessing_statistics(self) -> Dict[str, Any]:
+        """Get detailed preprocessing statistics."""
+        session = self.get_session()
+        try:
+            # Count questions by preprocessing result
+            success_count = session.query(func.count(ProcessingStatus.id)).filter(
+                ProcessingStatus.status == 'preprocessed'
+            ).scalar() or 0
+
+            failed_count = session.query(func.count(ProcessingStatus.id)).filter(
+                ProcessingStatus.status == 'failed',
+                ProcessingStatus.preprocessing_error.isnot(None)
+            ).scalar() or 0
+
+            cant_convert_count = session.query(func.count(ProcessingStatus.id)).filter(
+                ProcessingStatus.status == 'cant_convert'
+            ).scalar() or 0
+
+            total_processed = success_count + failed_count + cant_convert_count
+
+            return {
+                'total_processed': total_processed,
+                'success': success_count,
+                'failed': failed_count,
+                'cant_convert': cant_convert_count,
+            }
+        finally:
+            session.close()
+
+    def get_verification_statistics(self) -> Dict[str, Any]:
+        """Get detailed Lean verification statistics."""
+        session = self.get_session()
+        try:
+            # Count conversions by verification status from lean_conversion_results table
+            from sqlalchemy import text
+
+            # Use a query to count verification statuses
+            result = session.execute(text("""
+                SELECT
+                    COUNT(*) as total_checked,
+                    SUM(CASE WHEN verification_status = 'passed' THEN 1 ELSE 0 END) as passed,
+                    SUM(CASE WHEN verification_status = 'warning' THEN 1 ELSE 0 END) as warning,
+                    SUM(CASE WHEN verification_status = 'failed' THEN 1 ELSE 0 END) as failed,
+                    SUM(CASE WHEN verification_status = 'not_verified' THEN 1 ELSE 0 END) as not_verified
+                FROM lean_conversion_results
+            """)).fetchone()
+
+            total_checked = result[0] or 0
+            passed = result[1] or 0
+            warning = result[2] or 0
+            failed = result[3] or 0
+            not_verified = result[4] or 0
+
+            # passed + warning = verified successfully
+            total_verified = passed + warning
+
+            return {
+                'total_checked': total_checked,
+                'passed': passed,
+                'warning': warning,
+                'failed': failed,
+                'not_verified': not_verified,
+                'total_verified': total_verified,
+            }
+        finally:
+            session.close()
+
     def export_verified_lean_data(self) -> List[Dict[str, Any]]:
         """Export all verified Lean data as list of dicts for JSONL export.
 

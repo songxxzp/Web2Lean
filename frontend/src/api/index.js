@@ -62,7 +62,10 @@ export const statisticsApi = {
     apiRequest(`/statistics/site/${siteId}`),
 
   processing: () =>
-    apiRequest('/statistics/processing')
+    apiRequest('/statistics/processing'),
+
+  detailed: () =>
+    apiRequest('/statistics/detailed')
 }
 
 /**
