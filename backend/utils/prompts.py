@@ -45,7 +45,12 @@ You must follow this decision process strictly:
 4. If the question is already correct and formal:
    - Copy it verbatim into "corrected_question".
 
-5. Value assessment.
+5. Theorem naming.
+   - Generate a concise, descriptive name for this theorem.
+   - The name should capture the main mathematical concept or result.
+   - Use only lowercase letters and underscores (e.g., "pythagorean_theorem", "fundamental_theorem_of_calculus").
+
+6. Value assessment.
    - Assess the value of formalizing this question:
      - "low": trivial facts or routine exercises
      - "medium": standard problems suitable for teaching or reference
@@ -64,6 +69,7 @@ Output requirements (STRICT):
   "errors": [string],
   "corrected_question": string,
   "correction_notes": string,
+  "theorem_name": string,
   "worth_formalizing": boolean,
   "formalization_value": "low" | "medium" | "high"
 }}
@@ -109,7 +115,12 @@ You must follow this decision process strictly:
    - Preserve the original mathematical meaning.
    - If already formal and correct, copy verbatim.
 
-5. Value assessment.
+5. Theorem naming.
+   - Generate a concise, descriptive name for this theorem.
+   - The name should capture the main mathematical concept or result.
+   - Use only lowercase letters and underscores (e.g., "pythagorean_theorem", "fundamental_theorem_of_calculus").
+
+6. Value assessment.
    - Assess the value of formalizing this question–answer pair:
      - "low": trivial or routine
      - "medium": standard educational value
@@ -130,6 +141,7 @@ Output requirements (STRICT):
   "corrected_question": string,
   "corrected_answer": string,
   "correction_notes": string,
+  "theorem_name": string,
   "worth_formalizing": boolean,
   "formalization_value": "low" | "medium" | "high"
 }}
@@ -179,7 +191,12 @@ You must follow this decision process strictly:
    - Produce a single correct, complete, and formal mathematical answer in
      "corrected_answer", based on the best candidate answer(s).
 
-5. Value assessment.
+5. Theorem naming.
+   - Generate a concise, descriptive name for this theorem.
+   - The name should capture the main mathematical concept or result.
+   - Use only lowercase letters and underscores (e.g., "pythagorean_theorem", "fundamental_theorem_of_calculus").
+
+6. Value assessment.
    - Assess the value of this question–answer pair:
      - "low": trivial
      - "medium": standard educational value
@@ -187,7 +204,7 @@ You must follow this decision process strictly:
    - If it lacks value:
      - Set "worth_formalizing" = false.
 
-6. Documentation.
+7. Documentation.
    - In "correction_notes", briefly explain which candidate answer(s) were relied upon,
      whether accepted or high-score answers were correct, and what corrections were made.
 
@@ -204,6 +221,7 @@ Output requirements (STRICT):
   "corrected_question": string,
   "corrected_answer": string,
   "correction_notes": string,
+  "theorem_name": string,
   "worth_formalizing": boolean,
   "formalization_value": "low" | "medium" | "high"
 }}
@@ -226,3 +244,40 @@ def format_answers_text(answers: list) -> str:
         score_info = f" (score: {ans.get('score', 0)})" if 'score' in ans else ""
         answers_text += f"\n--- Answer {i+1}{accepted_mark}{score_info} ---\n{ans.get('body', '')}\n"
     return answers_text
+
+
+def sanitize_theorem_name(name: str) -> str:
+    """
+    Sanitize theorem name to only contain lowercase letters and underscores.
+
+    Args:
+        name: Raw theorem name from LLM
+
+    Returns:
+        Sanitized theorem name
+
+    Examples:
+        "Pythagorean Theorem" -> "pythagorean_theorem"
+        "Fundamental Theorem of Calculus" -> "fundamental_theorem_of_calculus"
+        "Cauchy-Schwarz Inequality" -> "cauchy_schwarz_inequality"
+    """
+    import re
+
+    # Convert to lowercase
+    name = name.lower()
+
+    # Replace spaces and special chars with underscores
+    # Only keep a-z and underscores
+    name = re.sub(r'[^a-z]+', '_', name)
+
+    # Remove leading/trailing underscores
+    name = name.strip('_')
+
+    # Remove multiple consecutive underscores
+    name = re.sub(r'_+', '_', name)
+
+    # Ensure name is not empty
+    if not name:
+        name = "unnamed_theorem"
+
+    return name

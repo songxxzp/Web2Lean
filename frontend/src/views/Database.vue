@@ -59,6 +59,14 @@
     <el-table :data="questions" stripe @row-click="showDetail">
       <el-table-column prop="id" label="ID" width="80" />
       <el-table-column prop="title" label="Title" show-overflow-tooltip />
+      <el-table-column label="Theorem Name" width="180">
+        <template #default="{ row }">
+          <span v-if="row.processing_status?.theorem_name" style="font-family: monospace; color: #409eff;">
+            {{ row.processing_status.theorem_name }}
+          </span>
+          <span v-else style="color: #999;">-</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="score" label="Score" width="100" />
       <el-table-column prop="answer_count" label="Answers" width="100" />
       <el-table-column label="Status" width="150">
@@ -158,6 +166,12 @@
         <el-descriptions :column="2" border style="margin-bottom: 1rem">
           <el-descriptions-item label="ID">{{ selectedQuestion.id }}</el-descriptions-item>
           <el-descriptions-item label="Score">{{ selectedQuestion.score }}</el-descriptions-item>
+          <el-descriptions-item label="Theorem Name">
+            <span v-if="selectedQuestion.processing_status?.theorem_name" style="font-family: monospace; color: #409eff;">
+              {{ selectedQuestion.processing_status.theorem_name }}
+            </span>
+            <span v-else style="color: #999;">Not generated</span>
+          </el-descriptions-item>
           <el-descriptions-item label="Status">
             <el-tag>{{ selectedQuestion.processing_status?.status || 'raw' }}</el-tag>
           </el-descriptions-item>

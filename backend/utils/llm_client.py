@@ -11,7 +11,8 @@ from .prompts import (
     QUESTION_ONLY_PROMPT,
     QUESTION_WITH_ANSWER_PROMPT,
     QUESTION_WITH_MULTIPLE_ANSWERS_PROMPT,
-    format_answers_text
+    format_answers_text,
+    sanitize_theorem_name
 )
 
 try:
@@ -320,7 +321,11 @@ class ZhipuClient:
 
         # Try to extract JSON from response
         try:
-            return parse_json_from_llm_response(content)
+            result = parse_json_from_llm_response(content)
+            # Sanitize theorem_name if present
+            if result.get('theorem_name'):
+                result['theorem_name'] = sanitize_theorem_name(result['theorem_name'])
+            return result
         except (json.JSONDecodeError, ValueError) as e:
             # Return default safe response
             return {
@@ -390,7 +395,11 @@ class ZhipuClient:
 
         # Try to extract JSON from response
         try:
-            return parse_json_from_llm_response(content)
+            result = parse_json_from_llm_response(content)
+            # Sanitize theorem_name if present
+            if result.get('theorem_name'):
+                result['theorem_name'] = sanitize_theorem_name(result['theorem_name'])
+            return result
         except (json.JSONDecodeError, ValueError) as e:
             # Return default safe response - use first answer if available
             return {
@@ -452,7 +461,11 @@ class ZhipuClient:
 
         # Try to extract JSON from response
         try:
-            return parse_json_from_llm_response(content)
+            result = parse_json_from_llm_response(content)
+            # Sanitize theorem_name if present
+            if result.get('theorem_name'):
+                result['theorem_name'] = sanitize_theorem_name(result['theorem_name'])
+            return result
         except (json.JSONDecodeError, ValueError) as e:
             # Return default safe response
             return {

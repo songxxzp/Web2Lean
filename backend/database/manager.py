@@ -277,6 +277,7 @@ class DatabaseManager:
                     'preprocessed_body': ps.preprocessed_body if ps else None,
                     'preprocessed_answer': ps.preprocessed_answer if ps else None,
                     'correction_notes': ps.correction_notes if ps else None,
+                    'theorem_name': ps.theorem_name if ps else None,
                     'preprocessing_error': ps.preprocessing_error if ps else None,
                     'question_lean_code': ps.question_lean_code if ps else None,
                     'answer_lean_code': ps.answer_lean_code if ps else None,
@@ -364,6 +365,7 @@ class DatabaseManager:
                     'processing_status': {
                         'status': ps.status if ps else 'raw',
                         'verification_status': ps.verification_status if ps else None,
+                        'theorem_name': ps.theorem_name if ps else None,
                     }
                 }
                 for q, ps, actual_answers in results

@@ -114,7 +114,14 @@ class LLMProcessor:
             if not result or not isinstance(result, dict):
                 raise ValueError(f"Invalid processing result: {result}")
 
-            logger.info(f"LLM completed for question {question_internal_id}: has_answer={bool(result.get('preprocessed_answer'))}")
+            # Fallback: if LLM didn't return theorem_name, generate one from title
+            theorem_name = result.get('theorem_name')
+            if not theorem_name or not theorem_name.strip():
+                from ..utils.prompts import sanitize_theorem_name
+                theorem_name = sanitize_theorem_name(question['title'])
+                logger.warning(f"LLM did not return theorem_name for question {question_internal_id}, using fallback: {theorem_name}")
+
+            logger.info(f"LLM completed for question {question_internal_id}: has_answer={bool(result.get('preprocessed_answer'))}, theorem_name={theorem_name}")
 
             # Update processing status with preprocessed data
             self.db.update_processing_status(
@@ -123,6 +130,7 @@ class LLMProcessor:
                 ocr_completed=bool(ocr_results),
                 preprocessed_body=result.get('preprocessed_body', question['body']),
                 preprocessed_answer=result.get('preprocessed_answer'),
+                theorem_name=theorem_name,
                 correction_notes=result.get('correction_notes'),
                 processing_completed_at=self._now()
             )
@@ -193,6 +201,7 @@ class LLMProcessor:
             return {
                 'status': 'preprocessed',
                 'preprocessed_body': result.get('corrected_question', question_text),
+                'theorem_name': result.get('theorem_name'),
                 'correction_notes': result.get('correction_notes', '')
             }
 
@@ -237,6 +246,7 @@ class LLMProcessor:
                     'status': 'preprocessed',
                     'preprocessed_body': result.get('corrected_question', question_text),
                     'preprocessed_answer': result.get('corrected_answer', answer_text),
+                    'theorem_name': result.get('theorem_name'),
                     'correction_notes': result.get('correction_notes', '')
                 }
             else:
@@ -244,6 +254,7 @@ class LLMProcessor:
                 return {
                     'status': 'preprocessed',
                     'preprocessed_body': result.get('corrected_question', question_text),
+                    'theorem_name': result.get('theorem_name'),
                     'correction_notes': result.get('correction_notes', '') + " [Answer excluded: not valid]"
                 }
 
@@ -283,6 +294,7 @@ class LLMProcessor:
                     'status': 'preprocessed',
                     'preprocessed_body': result.get('corrected_question', question_text),
                     'preprocessed_answer': None,
+                    'theorem_name': result.get('theorem_name'),
                     'correction_notes': result.get('correction_notes', '') + " [No valid answer found]"
                 }
 
@@ -291,6 +303,7 @@ class LLMProcessor:
                 'status': 'preprocessed',
                 'preprocessed_body': result.get('corrected_question', question_text),
                 'preprocessed_answer': result.get('corrected_answer'),
+                'theorem_name': result.get('theorem_name'),
                 'correction_notes': result.get('correction_notes', '')
             }
 

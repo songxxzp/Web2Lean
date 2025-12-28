@@ -6,16 +6,20 @@ Usage:
     python test_preprocess_cli.py [options]
 
 Options:
-    --write, -w    Enable write mode (save results to database)
-                   Default: read-only mode (results NOT saved)
+    --write, -w      Enable write mode (save results to database)
+                     Default: read-only mode (results NOT saved)
+    --backend, -b    Test full backend preprocessing (LLMProcessor)
+                     Default: test LLM API only (ZhipuClient)
 
 Examples:
-    # Read-only mode (default)
+    # Read-only mode, test LLM API only (default)
     python test_preprocess_cli.py
 
-    # Write mode (save results to database)
-    python test_preprocess_cli.py --write
-    python test_preprocess_cli.py -w
+    # Write mode, test full backend preprocessing
+    python test_preprocess_cli.py --write --backend
+
+    # Short options
+    python test_preprocess_cli.py -w -b
 """
 import sys
 import os
@@ -202,6 +206,10 @@ def display_processing_result(result: dict):
     if result.get('status') == 'preprocessed':
         print("\n✅ Preprocessing completed successfully!")
 
+        if result.get('theorem_name'):
+            print(f"\n📐 Theorem Name:")
+            print(f"  {result['theorem_name']}")
+
         if result.get('preprocessed_body'):
             print(f"\nPreprocessed Body:")
             print(f"  {result['preprocessed_body'][:200]}...")
@@ -374,6 +382,7 @@ def build_processing_result(llm_result: dict, question: dict) -> dict:
         'status': 'preprocessed',
         'preprocessed_body': llm_result.get('corrected_question'),
         'preprocessed_answer': llm_result.get('corrected_answer'),
+        'theorem_name': llm_result.get('theorem_name'),
         'correction_notes': llm_result.get('correction_notes', '')
     }
 
@@ -413,6 +422,7 @@ def write_result_to_db(db, question_id: int, llm_result: dict, question: dict):
         'status': 'preprocessed',
         'preprocessed_body': llm_result.get('corrected_question'),
         'preprocessed_answer': llm_result.get('corrected_answer'),
+        'theorem_name': llm_result.get('theorem_name'),
         'correction_notes': llm_result.get('correction_notes', ''),
         'processing_completed_at': datetime.now().isoformat()
     }
@@ -420,12 +430,89 @@ def write_result_to_db(db, question_id: int, llm_result: dict, question: dict):
     db.update_processing_status(question_id, **update_data)
 
 
+def test_backend_preprocessing(question_id: int, write_to_db: bool = False):
+    """Test full backend preprocessing (LLMProcessor).
+
+    Args:
+        question_id: Question ID to test
+        write_to_db: If True, use real LLMProcessor (writes to DB).
+                    If False, simulate without writing.
+    """
+    from backend.config import get_settings
+    from backend.database import DatabaseManager
+    from backend.processing import LLMProcessor
+
+    print(f"\n🚀 Starting BACKEND preprocessing test for question ID: {question_id}")
+    if write_to_db:
+        print("⚠️  FULL BACKEND MODE - Using LLMProcessor.process_question()")
+        print("   Results will be saved to database")
+    else:
+        print("📖 SIMULATION MODE - Simulate backend preprocessing")
+        print("   Results will NOT be saved to database")
+
+    # Initialize
+    settings = get_settings()
+    db = DatabaseManager(settings.db_path)
+
+    # Get question info
+    print("\n📋 Fetching question from database...")
+    question = db.get_question(question_id)
+    if not question:
+        print(f"❌ Question {question_id} not found in database!")
+        return
+
+    display_question_info(question)
+
+    # Get current processing status
+    current_status = question.get('processing_status', {})
+    if current_status.get('status') in ['preprocessed', 'lean_converted']:
+        print(f"\n⚠️  Question is already '{current_status.get('status')}'")
+        choice = input("Do you want to reprocess? (y/N): ").strip().lower()
+        if choice != 'y':
+            print("Aborted.")
+            return
+
+    # Run backend preprocessing
+    print("\n🔄 Running backend preprocessing (LLMProcessor)...")
+    print("⏳ Please wait, this may take 10-30 seconds...\n")
+
+    try:
+        if write_to_db:
+            # Use real LLMProcessor (writes to database)
+            processor = LLMProcessor(db, api_key=settings.zhipu_api_key)
+            result = processor.process_question(question_id)
+
+            # Display result
+            display_processing_result({
+                'status': result.get('status'),
+                'theorem_name': question.get('processing_status', {}).get('theorem_name'),
+                'preprocessed_body': question.get('processing_status', {}).get('preprocessed_body'),
+                'preprocessed_answer': question.get('processing_status', {}).get('preprocessed_answer'),
+                'correction_notes': question.get('processing_status', {}).get('correction_notes'),
+                'has_answer': result.get('has_answer'),
+                'ocr_count': result.get('ocr_count')
+            })
+        else:
+            # Simulation mode - just show what would happen
+            print("📖 SIMULATION MODE - Not actually calling LLMProcessor")
+            print("\n✅ Simulation complete")
+            print("   Use --backend --write to actually run preprocessing")
+
+    except Exception as e:
+        print(f"\n❌ Error during backend preprocessing:")
+        print(f"  {type(e).__name__}: {e}")
+        import traceback
+        print("\n📋 Traceback:")
+        traceback.print_exc()
+
+
 def main():
     """Main CLI loop."""
     import sys
 
-    # Check for --write flag
+    # Check for flags
     write_to_db = '--write' in sys.argv or '-w' in sys.argv
+    backend_mode = '--backend' in sys.argv or '-b' in sys.argv
 
     print("\n" + "=" * 80)
     print("🧪 PREPROCESS CLI TEST TOOL")
@@ -433,8 +520,21 @@ def main():
     print("\nThis tool allows you to test the preprocessing pipeline for specific questions.")
     print("You will see:")
     print("  1. Question information")
-    print("  2. Raw LLM API response")
-    print("  3. Final backend processing result")
+    if backend_mode:
+        print("  2. Full backend preprocessing (LLMProcessor)")
+        print("  3. Final processing result from database")
+    else:
+        print("  2. Raw LLM API response (ZhipuClient)")
+        print("  3. Final backend processing result")
+
+    # Show mode info
+    if backend_mode:
+        print("\n🔧 BACKEND MODE (--backend flag detected)")
+        print("   Testing LLMProcessor.process_question()")
+    else:
+        print("\n🌐 API MODE (default)")
+        print("   Testing ZhipuClient.chat_completion() directly")
+
     if write_to_db:
         print("\n⚠️  WRITE MODE ENABLED (--write flag detected)")
         print("   Results WILL be saved to database")
@@ -496,7 +596,12 @@ def main():
 
         try:
             question_id = int(question_id)
-            test_preprocess(question_id, write_to_db=write_to_db)
+
+            # Choose test function based on mode
+            if backend_mode:
+                test_backend_preprocessing(question_id, write_to_db=write_to_db)
+            else:
+                test_preprocess(question_id, write_to_db=write_to_db)
         except ValueError:
             print("❌ Invalid input. Please enter a numeric ID.")
         except Exception as e:

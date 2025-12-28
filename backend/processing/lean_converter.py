@@ -68,17 +68,21 @@ class LeanConverter:
         )
 
         try:
+            # Import sanitize function
+            from ..utils.prompts import sanitize_theorem_name
+
             # Use preprocessed content if available
             body = status.get('preprocessed_body') or question['body']
             answer = status.get('preprocessed_answer')
+            theorem_name = status.get('theorem_name') or sanitize_theorem_name(question['title'])
 
             # Convert question to Lean
-            question_lean = self._convert_question_to_lean(question['title'], body)
+            question_lean = self._convert_question_to_lean(theorem_name, body)
 
             # Convert answer to Lean if available
             answer_lean = None
             if answer:
-                answer_lean = self._convert_answer_to_lean(question['title'], body, answer)
+                answer_lean = self._convert_answer_to_lean(theorem_name, body, answer)
 
             # Combine question and answer Lean code (for backward compatibility)
             combined_lean = self._combine_lean_code(question_lean, answer_lean)
@@ -130,7 +134,7 @@ class LeanConverter:
         Convert a question to Lean 4 theorem declaration (without proof).
 
         Args:
-            title: Question title
+            title: Theorem name (from preprocessing)
             body: Question body
 
         Returns:
@@ -138,7 +142,10 @@ class LeanConverter:
         """
         problem_text = f"{body}"
 
-        prompt = f"Use the following theorem names: my_declaration.\n\n{problem_text}"
+        if title.strip() == "":
+            title = "my_declaration"
+
+        prompt = f"Use the following theorem names: {title}.\n\n{problem_text}"
 
         lean_code = self.client.convert_to_lean(
             problem_text=prompt,
@@ -156,7 +163,7 @@ class LeanConverter:
         Convert a problem + solution to a complete Lean 4 theorem with proof.
 
         Args:
-            title: Question title
+            title: Theorem name (from preprocessing)
             body: Question body
             answer: Answer text
 
@@ -166,7 +173,10 @@ class LeanConverter:
         # Combine problem and solution
         problem_text = f"{body}\n\n{answer}"
 
-        prompt = f"Use the following theorem names: my_theorem.\n\n{problem_text}"
+        if title.strip() == "":
+            title = "my_theorem"
+
+        prompt = f"Use the following theorem names: {title}.\n\n{problem_text}"
 
         lean_code = self.client.convert_to_lean(
             problem_text=prompt,
