@@ -136,9 +136,9 @@ class LeanConverter:
         Returns:
             Lean 4 code for the question
         """
-        problem_text = f"Problem: {title}\n\n{body}"
+        problem_text = f"{body}"
 
-        prompt = f"Use the following theorem names: problem_{title}.\n\n{problem_text}"
+        prompt = f"Use the following theorem names: my_declaration.\n\n{problem_text}"
 
         lean_code = self.client.convert_to_lean(
             problem_text=prompt,
@@ -164,9 +164,9 @@ class LeanConverter:
             Complete Lean 4 code with theorem declaration AND proof
         """
         # Combine problem and solution
-        problem_text = f"Problem: {title}\n\n{body}\n\nSolution: {answer}"
+        problem_text = f"{body}\n\n{answer}"
 
-        prompt = f"Use the following theorem names: theorem_{title}.\n\n{problem_text}"
+        prompt = f"Use the following theorem names: my_theorem.\n\n{problem_text}"
 
         lean_code = self.client.convert_to_lean(
             problem_text=prompt,
