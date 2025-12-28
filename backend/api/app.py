@@ -56,7 +56,7 @@ def create_app(config_path: str = None) -> Flask:
     def index():
         return jsonify({
             'name': 'Web2Lean API',
-            'version': '1.0.0',
+            'version': '1.0.1',
             'status': 'running'
         })
 

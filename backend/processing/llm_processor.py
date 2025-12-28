@@ -10,6 +10,9 @@ from ..utils import ZhipuClient
 
 logger = logging.getLogger(__name__)
 
+# Backend version for tracking preprocessing changes
+BACKEND_VERSION = "1.0.1"
+
 
 class LLMProcessor:
     """Process questions using GLM-4V/4 for OCR and content correction."""
@@ -132,6 +135,7 @@ class LLMProcessor:
                 preprocessed_answer=result.get('preprocessed_answer'),
                 theorem_name=theorem_name,
                 correction_notes=result.get('correction_notes'),
+                preprocessing_version=BACKEND_VERSION,
                 processing_completed_at=self._now()
             )
 
