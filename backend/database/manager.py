@@ -565,6 +565,38 @@ class DatabaseManager:
         finally:
             session.close()
 
+    def get_questions_not_converted_by(self, converter_name: str, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get preprocessed questions that haven't been converted by a specific converter."""
+        session = self.get_session()
+        try:
+            # Subquery to find questions already converted by this converter
+            converted_ids = session.query(LeanConversionResult.question_id).filter(
+                LeanConversionResult.converter_name == converter_name
+            ).subquery()
+
+            # Get preprocessed questions not in the converted_ids subquery
+            results = session.query(Question, ProcessingStatus).join(
+                ProcessingStatus,
+                Question.id == ProcessingStatus.question_id
+            ).filter(
+                ProcessingStatus.status == 'preprocessed'
+            ).filter(
+                ~Question.id.in_(converted_ids)
+            ).limit(limit).all()
+
+            return [
+                {
+                    'id': q.id,
+                    'question_id': q.question_id,
+                    'site_id': q.site_id,
+                    'title': q.title,
+                    'body': q.body,
+                }
+                for q, ps in results
+            ]
+        finally:
+            session.close()
+
     # ===== Crawler Runs =====
 
     def create_crawler_run(self, site_id: int, run_id: str, run_mode: str = 'incremental') -> CrawlerRun:

@@ -138,6 +138,10 @@
                 placeholder="0 for all"
                 style="width: 150px"
               />
+              <el-select v-model="leanConverter" style="width: 200px" placeholder="Select Converter">
+                <el-option label="Kimina (Legacy)" value="kimina" />
+                <el-option label="GLM LLM Agent" value="llm" />
+              </el-select>
               <el-button
                 type="success"
                 @click="startLeanConversion"
@@ -265,6 +269,7 @@ const queueStats = ref([])
 const totalQuestions = ref(0)
 const preprocessLimit = ref(10)
 const leanLimit = ref(10)
+const leanConverter = ref('kimina')  // 'kimina' or 'llm'
 const verificationLimit = ref(10)
 
 const preprocessTask = ref(null)
@@ -299,9 +304,19 @@ async function loadProgress() {
       preprocessTask.value = null
     }
 
-    const leanResp = await processingApi.getProgress('lean_conversion')
-    if (leanResp.active) {
-      leanTask.value = leanResp.progress
+    // Check for either kimina or llm lean conversion tasks
+    const kiminaResp = await processingApi.getProgress('lean_conversion_kimina')
+    const llmResp = await processingApi.getProgress('lean_conversion_llm')
+
+    // Show progress for whichever is active (prioritize based on selected converter)
+    if (leanConverter.value === 'kimina' && kiminaResp.active) {
+      leanTask.value = kiminaResp.progress
+    } else if (leanConverter.value === 'llm' && llmResp.active) {
+      leanTask.value = llmResp.progress
+    } else if (kiminaResp.active) {
+      leanTask.value = kiminaResp.progress
+    } else if (llmResp.active) {
+      leanTask.value = llmResp.progress
     } else {
       leanTask.value = null
     }
@@ -353,7 +368,7 @@ async function startLeanConversion() {
   processing.value = true
   try {
     const limit = leanLimit.value === 0 ? 10000 : leanLimit.value
-    const result = await processingApi.startLean({ limit })
+    const result = await processingApi.startLean({ limit, converter: leanConverter.value })
     ElMessage.success(result.message)
 
     if (result.task_id) {

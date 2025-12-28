@@ -135,6 +135,11 @@
             <span style="margin-left: 10px; color: #999;">用于Lean代码转换(可选)</span>
           </el-form-item>
 
+          <el-form-item label="Lean Max Iterations">
+            <el-input-number v-model="models.lean_max_iterations" :min="0" :max="10" :step="1" style="width: 200px" />
+            <span style="margin-left: 10px; color: #999;">LLM转换器最大迭代修正次数（默认1）</span>
+          </el-form-item>
+
           <el-divider content-position="left">Local Models (本地模型)</el-divider>
 
           <el-form-item label="VLLM Base URL">
@@ -162,7 +167,8 @@
             <ul style="margin: 10px 0; padding-left: 20px;">
               <li><strong>GLM-4.7</strong>: 最新最强的文本模型（深度思考模式），用于复杂推理和验证</li>
               <li><strong>GLM-4.6V</strong>: 最新多模态模型，用于图像OCR和理解</li>
-              <li><strong>Kimina</strong>: 本地运行的Lean专用模型（推荐），需要VLLM服务</li>
+              <li><strong>Kimina (Local)</strong>: 本地运行的Lean专用模型（推荐），需要VLLM服务</li>
+              <li><strong>GLM Lean Agent</strong>: 基于GLM的Lean转换器，支持迭代修正，使用GLM-4.7时效果最佳</li>
             </ul>
           </el-alert>
         </el-form>
@@ -247,11 +253,12 @@ const schedules = ref([])
 const models = ref({
   glm_text_model: 'glm-4.7',
   glm_vision_model: 'glm-4.6v',
-  glm_lean_model: 'local',
+  glm_lean_model: 'glm-4.7',
   vllm_base_url: 'http://localhost:8000/v1',
   vllm_model_path: '/root/Kimina-Autoformalizer-7B',
   preprocessing_concurrency: 2,
-  preprocessing_max_length: 16000
+  preprocessing_max_length: 16000,
+  lean_max_iterations: 1
 })
 
 // Site config dialog

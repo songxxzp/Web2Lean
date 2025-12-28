@@ -17,38 +17,67 @@ def start_lean_conversion():
     data = request.get_json() or {}
     limit = data.get('limit', 10)
     site_id = data.get('site_id')
+    converter_type = data.get('converter', 'kimina')  # 'kimina' or 'llm'
 
     db = current_app.config['db']
 
-    # Check if there's an active task
+    # Check if there's an active task for this specific converter type
     from ...processing import TaskManager
     task_manager = TaskManager()
-    active_task = task_manager.get_active_task('lean_conversion')
+    task_type = f'lean_conversion_{converter_type}'  # Unique task type per converter
+    active_task = task_manager.get_active_task(task_type)
     if active_task:
         return jsonify({
-            'error': 'Lean conversion already in progress',
+            'error': f'{converter_type.upper()} Lean conversion already in progress',
             'task_id': active_task.task_id,
             'progress': active_task.get_progress()
         }), 400
 
-    # Get questions ready for conversion (preprocessed but not yet converted)
-    questions = db.get_questions_by_status('preprocessed', limit=limit)
+    # Map converter type to converter name
+    converter_name_map = {
+        'kimina': 'Kimina-Legacy',
+        'llm': 'GLM-LLM-Agent'
+    }
+    converter_name = converter_name_map.get(converter_type, 'Kimina-Legacy')
+
+    # Get questions ready for conversion (preprocessed but not yet converted by this converter)
+    questions = db.get_questions_not_converted_by(converter_name, limit=limit)
 
     if not questions:
-        return jsonify({'message': 'No questions ready for Lean conversion'})
+        return jsonify({'message': f'No questions ready for {converter_name} conversion'})
 
-    # Create task
-    task = task_manager.create_task('lean_conversion', len(questions))
+    # Create task with converter-specific type
+    task = task_manager.create_task(task_type, len(questions))
 
-    # Import converter
+    # Import and instantiate the appropriate converter
     try:
-        from ...processing import LeanConverter
+        settings = current_app.config['settings']
 
-        converter = LeanConverter(
-            db_manager=db,
-            vllm_base_url=current_app.config['settings'].vllm_base_url,
-            model_path=current_app.config['settings'].vllm_model_path
-        )
+        # Choose converter based on request parameter
+        if converter_type == 'llm':
+            # Use LLM-based converter
+            from ...processing import LLMLeanConverter
+
+            converter = LLMLeanConverter(
+                db_manager=db,
+                api_key=settings.zhipu_api_key,
+                model=settings.glm_lean_model,
+                kimina_url=settings.kimina_url,
+                max_iterations=settings.lean_max_iterations,
+                temperature=0.2,
+                max_tokens=4096,
+                converter_name=converter_name  # Pass converter name
+            )
+        else:
+            # Use local Kimina converter
+            from ...processing import LeanConverter
+
+            converter = LeanConverter(
+                db_manager=db,
+                vllm_base_url=settings.vllm_base_url,
+                model_path=settings.vllm_model_path,
+                converter_name=converter_name  # Pass converter name
+            )
 
         def process_questions():
             for q in questions:
