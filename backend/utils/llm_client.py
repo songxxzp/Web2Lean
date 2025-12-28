@@ -7,12 +7,126 @@ import html
 import re
 from typing import Dict, Any, Optional, List
 
+from .prompts import (
+    QUESTION_ONLY_PROMPT,
+    QUESTION_WITH_ANSWER_PROMPT,
+    QUESTION_WITH_MULTIPLE_ANSWERS_PROMPT,
+    format_answers_text
+)
+
 try:
     from zai import ZhipuAiClient
     ZAI_AVAILABLE = True
 except ImportError:
     ZAI_AVAILABLE = False
     print("Warning: zai-sdk not installed. Using fallback HTTP client.")
+
+
+def parse_json_from_llm_response(content: str) -> Dict[str, Any]:
+    """
+    Robust JSON parser for LLM responses.
+
+    Handles:
+    - Markdown code blocks (```json, ```)
+    - JSON object boundaries detection
+    - Invalid escape sequences in LaTeX
+    - HTML entities
+    - Trailing/leading text outside JSON
+
+    Args:
+        content: Raw LLM response content
+
+    Returns:
+        Parsed JSON dict
+
+    Raises:
+        ValueError: If JSON cannot be parsed
+    """
+    # Remove markdown code blocks if present
+    if "```json" in content:
+        content = content.split("```json")[1].split("```")[0].strip()
+    elif "```" in content:
+        content = content.split("```")[1].split("```")[0].strip()
+
+    # Try to find the JSON object boundaries
+    start_idx = content.find('{')
+    if start_idx == -1:
+        raise ValueError("No JSON object found in response")
+
+    # Count braces to find matching closing brace
+    brace_count = 0
+    in_string = False
+    escape_next = False
+    end_idx = -1
+
+    for i in range(start_idx, len(content)):
+        char = content[i]
+
+        if escape_next:
+            escape_next = False
+            continue
+
+        if char == '\\':
+            escape_next = True
+            continue
+
+        if char == '"' and not escape_next:
+            in_string = not in_string
+            continue
+
+        if not in_string:
+            if char == '{':
+                brace_count += 1
+            elif char == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    end_idx = i + 1
+                    break
+
+    if end_idx == -1:
+        raise ValueError("Could not find complete JSON object")
+
+    json_str = content[start_idx:end_idx]
+
+    # Fix invalid escape sequences in JSON strings
+    def fix_json_escapes(s: str) -> str:
+        """Fix invalid escape sequences in JSON string values."""
+        result = []
+        i = 0
+        while i < len(s):
+            if s[i] == '\\' and i + 1 < len(s):
+                next_char = s[i + 1]
+                # Valid JSON escapes
+                if next_char in '"\\/bfnrt':
+                    result.append(s[i:i+2])
+                    i += 2
+                    continue
+                # Unicode escape like \uXXXX
+                elif next_char == 'u' and i + 5 < len(s):
+                    result.append(s[i:i+6])
+                    i += 6
+                    continue
+                # Invalid escapes - for LaTeX and special chars, double the backslash
+                # These commonly appear in mathematical content
+                elif next_char in '({[<>=_~.*+|?^-]\\\'':
+                    result.append('\\\\' + next_char)
+                    i += 2
+                    continue
+                else:
+                    # Other invalid escapes - just remove the backslash
+                    result.append(next_char)
+                    i += 2
+            else:
+                result.append(s[i])
+                i += 1
+        return ''.join(result)
+
+    json_str = fix_json_escapes(json_str)
+
+    # Decode HTML entities before parsing JSON
+    json_str = html.unescape(json_str)
+
+    return json.loads(json_str)
 
 
 class ZhipuClient:
@@ -173,120 +287,42 @@ class ZhipuClient:
         Returns:
             Correction result as dict
         """
-        user_prompt = f"""Example 1:
-Q: What is 2+2?
-A: The answer is 4.
-{{"is_valid_question":true,"is_valid_answer":true,"has_errors":false,"errors":[],"corrected_question":"What is 2+2?","corrected_answer":"The answer is 4.","correction_notes":"No corrections needed","worth_formalizing":true,"formalization_value":"low"}}
+        # Use lower temperature to force more deterministic JSON output
+        temp = min(temperature, 0.1)
 
-Example 2:
-Q: {question[:100]}
-A: {answer[:100]}
-
-{{"is_valid_question":true,"is_valid_answer":true,"has_errors":false,"errors":[],"corrected_question":"{question[:100]}","corrected_answer":"{answer[:100]}","correction_notes":"Valid","worth_formalizing":true,"formalization_value":"medium"}}"""
+        # Format prompt with question and answer
+        user_prompt = QUESTION_WITH_ANSWER_PROMPT.format(
+            question=question,
+            answer=answer
+        )
 
         messages = [{"role": "user", "content": user_prompt}]
 
-        response = self.chat_completion(
-            messages=messages,
-            model=model,
-            temperature=0,
-            max_tokens=2000
-        )
+        # Try using JSON mode if supported
+        try:
+            response = self.chat_completion(
+                messages=messages,
+                model=model,
+                temperature=temp,
+                max_tokens=16000,
+                response_format={"type": "json_object"}
+            )
+        except Exception:
+            # Fallback to regular call if JSON mode not supported
+            response = self.chat_completion(
+                messages=messages,
+                model=model,
+                temperature=temp,
+                max_tokens=16000
+            )
 
         content = response["choices"][0]["message"]["content"]
 
         # Try to extract JSON from response
         try:
-            # Remove markdown code blocks if present
-            if "```json" in content:
-                content = content.split("```json")[1].split("```")[0].strip()
-            elif "```" in content:
-                content = content.split("```")[1].split("```")[0].strip()
-
-            # Try to find the JSON object boundaries
-            start_idx = content.find('{')
-            if start_idx == -1:
-                # No JSON found - will be caught by outer handler and return default
-                raise ValueError("No JSON object found in response")
-
-            # Count braces to find matching closing brace
-            brace_count = 0
-            in_string = False
-            escape_next = False
-            end_idx = -1
-
-            for i in range(start_idx, len(content)):
-                char = content[i]
-
-                if escape_next:
-                    escape_next = False
-                    continue
-
-                if char == '\\':
-                    escape_next = True
-                    continue
-
-                if char == '"' and not escape_next:
-                    in_string = not in_string
-                    continue
-
-                if not in_string:
-                    if char == '{':
-                        brace_count += 1
-                    elif char == '}':
-                        brace_count -= 1
-                        if brace_count == 0:
-                            end_idx = i + 1
-                            break
-
-            if end_idx == -1:
-                raise ValueError("Could not find complete JSON object")
-
-            json_str = content[start_idx:end_idx]
-
-            # Fix invalid escape sequences in JSON strings
-            def fix_json_escapes(s):
-                """Fix invalid escape sequences in JSON string values."""
-                result = []
-                i = 0
-                while i < len(s):
-                    if s[i] == '\\' and i + 1 < len(s):
-                        next_char = s[i + 1]
-                        # Valid JSON escapes
-                        if next_char in '"\\/bfnrt':
-                            result.append(s[i:i+2])
-                            i += 2
-                            continue
-                        # Unicode escape like \uXXXX
-                        elif next_char == 'u' and i + 5 < len(s):
-                            result.append(s[i:i+6])
-                            i += 6
-                            continue
-                        # Invalid escapes - remove the backslash for these common LaTeX cases
-                        # Keep the backslash if it's followed by certain chars
-                        elif next_char in '({[<>=_~.*+|?^-]\\\'':
-                            # LaTeX or other special chars - keep the backslash
-                            result.append('\\\\' + next_char)
-                            i += 2
-                        else:
-                            # Other invalid escapes - just remove the backslash
-                            result.append(next_char)
-                            i += 2
-                    else:
-                        result.append(s[i])
-                        i += 1
-                return ''.join(result)
-
-            json_str = fix_json_escapes(json_str)
-
-            # Decode HTML entities before parsing JSON
-            json_str = html.unescape(json_str)
-
-            # Parse JSON
-            return json.loads(json_str)
-
+            return parse_json_from_llm_response(content)
         except (json.JSONDecodeError, ValueError) as e:
-            # Return default safe response instead of raising error
+            # Return default safe response
             return {
                 "is_valid_question": True,
                 "is_valid_answer": True,
@@ -307,7 +343,7 @@ A: {answer[:100]}
         model: str = "glm-4.7"
     ) -> Dict[str, Any]:
         """
-        Validate question and select best answer from multiple answers.
+        Validate question with multiple answers and produce a single correct, complete, formalized answer.
 
         Args:
             question: Question text
@@ -316,42 +352,19 @@ A: {answer[:100]}
             model: Model to use
 
         Returns:
-            Validation result with selected answer info
+            Validation result with corrected question and corrected answer
         """
         # Use lower temperature to force more deterministic JSON output
         temp = min(temperature, 0.1)
 
         # Format answers for LLM
-        answers_text = ""
-        for i, ans in enumerate(answers):
-            accepted_mark = " ✓ ACCEPTED" if ans.get('is_accepted') else ""
-            score_info = f" (score: {ans.get('score', 0)})" if 'score' in ans else ""
-            answers_text += f"\n--- Answer {i+1}{accepted_mark}{score_info} ---\n{ans.get('body', '')}\n"
+        answers_text = format_answers_text(answers)
 
-        user_prompt = f"""You are a JSON validator. Analyze and output ONLY raw JSON.
-
---- QUESTION ---
-{question}
-
---- ANSWERS ---
-{answers_text}
-
-Output this exact JSON structure with your analysis:
-{{
-  "is_valid_question": true,
-  "question_errors": [],
-  "answers_analysis": [
-    {{
-      "answer_index": 0,
-      "is_correct": true,
-      "is_complete": true,
-      "issues": []
-    }}
-  ],
-  "best_answer_index": 0,
-  "best_answer_summary": "summary",
-  "correction_notes": "notes"
-}}"""
+        # Format prompt with question and answers
+        user_prompt = QUESTION_WITH_MULTIPLE_ANSWERS_PROMPT.format(
+            question=question,
+            answers_text=answers_text
+        )
 
         messages = [{"role": "user", "content": user_prompt}]
 
@@ -361,7 +374,7 @@ Output this exact JSON structure with your analysis:
                 messages=messages,
                 model=model,
                 temperature=temp,
-                max_tokens=3000,
+                max_tokens=16000,
                 response_format={"type": "json_object"}
             )
         except Exception:
@@ -370,101 +383,26 @@ Output this exact JSON structure with your analysis:
                 messages=messages,
                 model=model,
                 temperature=temp,
-                max_tokens=3000
+                max_tokens=16000
             )
 
         content = response["choices"][0]["message"]["content"]
 
         # Try to extract JSON from response
         try:
-            # Remove markdown code blocks if present
-            if "```json" in content:
-                content = content.split("```json")[1].split("```")[0].strip()
-            elif "```" in content:
-                content = content.split("```")[1].split("```")[0].strip()
-
-            # Try to find the JSON object boundaries
-            start_idx = content.find('{')
-            if start_idx == -1:
-                # No JSON found - will be caught by outer handler and return default
-                raise ValueError("No JSON object found in response")
-
-            # Count braces to find matching closing brace
-            brace_count = 0
-            in_string = False
-            escape_next = False
-            end_idx = -1
-
-            for i in range(start_idx, len(content)):
-                char = content[i]
-
-                if escape_next:
-                    escape_next = False
-                    continue
-
-                if char == '\\':
-                    escape_next = True
-                    continue
-
-                if char == '"' and not escape_next:
-                    in_string = not in_string
-                    continue
-
-                if not in_string:
-                    if char == '{':
-                        brace_count += 1
-                    elif char == '}':
-                        brace_count -= 1
-                        if brace_count == 0:
-                            end_idx = i + 1
-                            break
-
-            if end_idx == -1:
-                raise ValueError("Could not find complete JSON object")
-
-            json_str = content[start_idx:end_idx]
-
-            # Fix invalid escape sequences
-            def fix_json_escapes(s):
-                result = []
-                i = 0
-                while i < len(s):
-                    if s[i] == '\\' and i + 1 < len(s):
-                        next_char = s[i + 1]
-                        if next_char in '"\\/bfnrt':
-                            result.append(s[i:i+2])
-                            i += 2
-                            continue
-                        elif next_char == 'u' and i + 5 < len(s):
-                            result.append(s[i:i+6])
-                            i += 6
-                            continue
-                        elif next_char in '({[<>=_~.*+|?^-]\\\'':
-                            result.append('\\\\' + next_char)
-                            i += 2
-                            continue
-                        else:
-                            result.append(next_char)
-                            i += 2
-                    else:
-                        result.append(s[i])
-                        i += 1
-                return ''.join(result)
-
-            json_str = fix_json_escapes(json_str)
-            json_str = html.unescape(json_str)
-
-            return json.loads(json_str)
-
+            return parse_json_from_llm_response(content)
         except (json.JSONDecodeError, ValueError) as e:
-            # Return default safe response - select first answer if available
+            # Return default safe response - use first answer if available
             return {
                 "is_valid_question": True,
-                "question_errors": [],
-                "answers_analysis": [{"answer_index": 0, "is_correct": True, "is_complete": True, "issues": []}] if answers else [],
-                "best_answer_index": 0 if answers else -1,
-                "best_answer_summary": "JSON parsing failed, selecting first answer",
-                "correction_notes": f"JSON parsing failed: {str(e)[:50]}"
+                "is_valid_answer": True,
+                "has_errors": False,
+                "errors": [],
+                "corrected_question": question,
+                "corrected_answer": answers[0].get('body', '') if answers else "",
+                "correction_notes": f"JSON parsing failed, using first answer: {str(e)[:50]}",
+                "worth_formalizing": True,
+                "formalization_value": "medium"
             }
 
     def correct_question_only(
@@ -487,20 +425,8 @@ Output this exact JSON structure with your analysis:
         # Use lower temperature to force more deterministic JSON output
         temp = min(temperature, 0.1)
 
-        user_prompt = f"""You are a JSON validator. Analyze and output ONLY raw JSON.
-
---- QUESTION ---
-{question}
-
-Output this exact JSON structure with your analysis:
-{{
-  "is_valid_question": true,
-  "has_errors": false,
-  "errors": [],
-  "corrected_question": "corrected if needed",
-  "correction_notes": "notes",
-  "worth_formalizing": true
-}}"""
+        # Format prompt with question
+        user_prompt = QUESTION_ONLY_PROMPT.format(question=question)
 
         messages = [{"role": "user", "content": user_prompt}]
 
@@ -510,7 +436,7 @@ Output this exact JSON structure with your analysis:
                 messages=messages,
                 model=model,
                 temperature=temp,
-                max_tokens=1500,
+                max_tokens=16000,
                 response_format={"type": "json_object"}
             )
         except Exception:
@@ -519,93 +445,24 @@ Output this exact JSON structure with your analysis:
                 messages=messages,
                 model=model,
                 temperature=temp,
-                max_tokens=1500
+                max_tokens=16000
             )
 
         content = response["choices"][0]["message"]["content"]
 
         # Try to extract JSON from response
         try:
-            if "```json" in content:
-                content = content.split("```json")[1].split("```")[0].strip()
-            elif "```" in content:
-                content = content.split("```")[1].split("```")[0].strip()
-
-            start_idx = content.find('{')
-            if start_idx == -1:
-                # No JSON found - will be caught by outer handler and return default
-                raise ValueError("No JSON object found in response")
-
-            brace_count = 0
-            in_string = False
-            escape_next = False
-            end_idx = -1
-
-            for i in range(start_idx, len(content)):
-                char = content[i]
-                if escape_next:
-                    escape_next = False
-                    continue
-                if char == '\\':
-                    escape_next = True
-                    continue
-                if char == '"' and not escape_next:
-                    in_string = not in_string
-                    continue
-                if not in_string:
-                    if char == '{':
-                        brace_count += 1
-                    elif char == '}':
-                        brace_count -= 1
-                        if brace_count == 0:
-                            end_idx = i + 1
-                            break
-
-            if end_idx == -1:
-                raise ValueError("Could not find complete JSON object")
-
-            json_str = content[start_idx:end_idx]
-
-            def fix_json_escapes(s):
-                result = []
-                i = 0
-                while i < len(s):
-                    if s[i] == '\\' and i + 1 < len(s):
-                        next_char = s[i + 1]
-                        if next_char in '"\\/bfnrt':
-                            result.append(s[i:i+2])
-                            i += 2
-                            continue
-                        elif next_char == 'u' and i + 5 < len(s):
-                            result.append(s[i:i+6])
-                            i += 6
-                            continue
-                        elif next_char in '({[<>=_~.*+|?^-]\\\'':
-                            result.append('\\\\' + next_char)
-                            i += 2
-                            continue
-                        else:
-                            result.append(next_char)
-                            i += 2
-                    else:
-                        result.append(s[i])
-                        i += 1
-                return ''.join(result)
-
-            json_str = fix_json_escapes(json_str)
-            json_str = html.unescape(json_str)
-
-            return json.loads(json_str)
-
+            return parse_json_from_llm_response(content)
         except (json.JSONDecodeError, ValueError) as e:
-            # Return default safe response - select first answer if available
+            # Return default safe response
             return {
                 "is_valid_question": True,
-                "question_errors": [],
-                "answers_analysis": [{"answer_index": 0, "is_correct": True, "is_complete": True, "issues": []}] if answers else [],
-                "best_answer_index": 0 if answers else -1,
-                "best_answer_summary": "JSON parsing failed, selecting first answer",
-                "correction_notes": f"JSON parsing failed: {str(e)[:50]}"
+                "has_errors": False,
+                "errors": [],
+                "corrected_question": question,
+                "correction_notes": f"JSON parsing failed, assuming valid: {str(e)[:50]}",
+                "worth_formalizing": True,
+                "formalization_value": "medium"
             }
 
 

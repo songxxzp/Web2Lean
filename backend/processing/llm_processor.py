@@ -252,7 +252,7 @@ class LLMProcessor:
 
     def _process_with_multiple_answers(self, question_text: str, answers: list) -> Dict[str, Any]:
         """
-        Process a question with multiple answers, selecting the best one.
+        Process a question with multiple answers using LLM to produce single correct answer.
 
         Args:
             question_text: Question text
@@ -276,25 +276,23 @@ class LLMProcessor:
                     'correction_notes': result.get('correction_notes', 'Question is not valid')
                 }
 
-            # Check if a valid answer was selected
-            best_index = result.get('best_answer_index', -1)
-
-            if best_index >= 0 and best_index < len(answers):
-                # Valid answer found
-                selected_answer = answers[best_index]['body']
-                return {
-                    'status': 'preprocessed',
-                    'preprocessed_body': question_text,  # Keep original, LLM can correct later
-                    'preprocessed_answer': selected_answer,
-                    'correction_notes': f"Selected answer {best_index + 1}/{len(answers)}: {result.get('best_answer_summary', '')}"
-                }
-            else:
+            # Check if a valid answer exists
+            if not result.get('is_valid_answer'):
                 # No valid answer, process question only
                 return {
                     'status': 'preprocessed',
-                    'preprocessed_body': question_text,
-                    'correction_notes': "No valid answer found, processing question only"
+                    'preprocessed_body': result.get('corrected_question', question_text),
+                    'preprocessed_answer': None,
+                    'correction_notes': result.get('correction_notes', '') + " [No valid answer found]"
                 }
+
+            # Use LLM-corrected question and answer directly
+            return {
+                'status': 'preprocessed',
+                'preprocessed_body': result.get('corrected_question', question_text),
+                'preprocessed_answer': result.get('corrected_answer'),
+                'correction_notes': result.get('correction_notes', '')
+            }
 
         except Exception as e:
             raise ValueError(f"Multiple answer validation failed: {e}")

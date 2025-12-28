@@ -142,7 +142,7 @@ class LeanConverter:
 
         lean_code = self.client.convert_to_lean(
             problem_text=prompt,
-            max_tokens=2048,
+            max_tokens=4096,
             temperature=0.6
         )
 
