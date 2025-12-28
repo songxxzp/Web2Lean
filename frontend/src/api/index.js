@@ -133,7 +133,36 @@ export const databaseApi = {
     apiRequest(`/database/questions/${questionId}/clear`, {
       method: 'POST',
       body: { stage }
-    })
+    }),
+
+  exportVerifiedLean: () => {
+    // Direct fetch for file download
+    return fetch('/api/database/export/verified-lean')
+      .then(response => {
+        if (!response.ok) {
+          throw new Error('Export failed')
+        }
+
+        // Get filename from headers before consuming response
+        const disposition = response.headers.get('Content-Disposition')
+        const filenameMatch = disposition && disposition.match(/filename="(.+)"/)
+        const filename = filenameMatch ? filenameMatch[1] : 'lean_verified_data.jsonl'
+
+        return response.blob().then(blob => ({ blob, filename }))
+      })
+      .then(({ blob, filename }) => {
+        // Create download link
+        const url = window.URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = filename
+
+        document.body.appendChild(a)
+        a.click()
+        window.URL.revokeObjectURL(url)
+        document.body.removeChild(a)
+      })
+  }
 }
 
 /**

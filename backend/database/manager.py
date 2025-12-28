@@ -459,6 +459,63 @@ class DatabaseManager:
         finally:
             session.close()
 
+    def export_verified_lean_data(self) -> List[Dict[str, Any]]:
+        """Export all verified Lean data as list of dicts for JSONL export.
+
+        Returns:
+            List of dictionaries containing verified Lean data
+        """
+        session = self.get_session()
+        try:
+            # Query questions with lean_converted status AND verification status in ('passed', 'warning')
+            results = session.query(Question, ProcessingStatus, Site).join(
+                ProcessingStatus, Question.id == ProcessingStatus.question_id
+            ).join(
+                Site, Question.site_id == Site.site_id
+            ).filter(
+                ProcessingStatus.status == 'lean_converted',
+                ProcessingStatus.verification_status.in_(['passed', 'warning'])
+            ).all()
+
+            export_data = []
+            for question, ps, site in results:
+                # Determine verification level
+                verification_status = ps.verification_status or 'not_verified'
+                if verification_status == 'passed':
+                    verification_level = 'passed'
+                elif verification_status == 'warning':
+                    verification_level = 'warning'
+                else:
+                    verification_level = 'info'
+
+                export_data.append({
+                    'id': question.id,
+                    'question_id': question.question_id,
+                    'site_id': question.site_id,
+                    'site_name': site.site_name,
+                    'title': question.title,
+                    'url': question.link,
+                    'score': question.score,
+                    'verification_status': verification_status,
+                    'verification_level': verification_level,
+                    'preprocessed_body': ps.preprocessed_body,
+                    'preprocessed_answer': ps.preprocessed_answer,
+                    'question_lean_code': ps.question_lean_code,
+                    'answer_lean_code': ps.answer_lean_code,
+                    'lean_code': ps.lean_code,
+                    'verification_time': ps.verification_time,
+                    'verification_completed_at': ps.verification_completed_at,
+                    'has_errors': ps.verification_has_errors,
+                    'has_warnings': ps.verification_has_warnings,
+                    'crawled_at': question.crawled_at,
+                    'processing_started_at': ps.processing_started_at,
+                    'processing_completed_at': ps.processing_completed_at
+                })
+
+            return export_data
+        finally:
+            session.close()
+
     # ===== Processing Status =====
 
     def update_processing_status(self, question_id: int, **kwargs) -> bool:

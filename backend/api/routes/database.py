@@ -283,3 +283,39 @@ def get_database_statistics():
     db = current_app.config['db']
     stats = db.get_statistics()
     return jsonify(stats)
+
+
+@database_bp.route('/export/verified-lean', methods=['GET', 'OPTIONS'])
+def export_verified_lean():
+    """Export verified Lean data as JSONL."""
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    from flask import Response
+    import json
+    from datetime import datetime
+
+    db = current_app.config['db']
+
+    try:
+        # Get all verified Lean data
+        data = db.export_verified_lean_data()
+
+        # Convert to JSONL (JSON Lines format)
+        jsonl_lines = [json.dumps(item, ensure_ascii=False) for item in data]
+        jsonl_content = '\n'.join(jsonl_lines) + '\n'
+
+        # Create filename with timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f'lean_verified_{timestamp}.jsonl'
+
+        # Return as file download
+        return Response(
+            jsonl_content,
+            mimetype='application/jsonl',
+            headers={
+                'Content-Disposition': f'attachment; filename="{filename}"'
+            }
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500

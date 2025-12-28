@@ -9,6 +9,9 @@
       </template>
       <div style="margin-top: 10px;">
         <el-button-group>
+          <el-button type="success" @click="exportVerifiedLean" :loading="exporting">
+            Export Verified Lean Data
+          </el-button>
           <el-button type="danger" @click="clearAll('lean')" :loading="clearing">
             Clear All Lean Code
           </el-button>
@@ -313,6 +316,7 @@ const selectedQuestion = ref(null)
 const activeTab = ref('raw')
 const clearing = ref(false)
 const verifying = ref(false)
+const exporting = ref(false)
 
 // Sort answers: accepted first, then by score
 const sortedAnswers = computed(() => {
@@ -468,6 +472,18 @@ async function clearQuestionStage(questionId, stage) {
     if (error !== 'cancel') {
       ElMessage.error(error.message || 'Failed to clear data')
     }
+  }
+}
+
+async function exportVerifiedLean() {
+  exporting.value = true
+  try {
+    await databaseApi.exportVerifiedLean()
+    ElMessage.success('Export completed successfully')
+  } catch (error) {
+    ElMessage.error(error.message || 'Export failed')
+  } finally {
+    exporting.value = false
   }
 }
 
