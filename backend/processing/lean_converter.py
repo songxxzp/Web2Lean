@@ -1,6 +1,15 @@
 """
 Lean converter using Kimina-Autoformalizer-7B via VLLM.
-Converts questions and answers separately to Lean 4.
+
+Conversion strategy:
+- Question Lean Code → Theorem declaration only (imports, setup, theorem with ':= by')
+- Answer Lean Code → Complete theorem with proof (from problem + solution)
+- Combined → Returns answer_lean if available, otherwise question_lean
+
+This approach ensures:
+1. question_lean_code can be displayed as the formalized problem statement
+2. answer_lean_code is a complete, verifiable Lean formalization
+3. Frontend can display both separately for clarity
 """
 from typing import Dict, Any
 
@@ -69,7 +78,7 @@ class LeanConverter:
             # Convert answer to Lean if available
             answer_lean = None
             if answer:
-                answer_lean = self._convert_answer_to_lean(answer)
+                answer_lean = self._convert_answer_to_lean(question['title'], body, answer)
 
             # Combine question and answer Lean code (for backward compatibility)
             combined_lean = self._combine_lean_code(question_lean, answer_lean)
@@ -118,7 +127,7 @@ class LeanConverter:
 
     def _convert_question_to_lean(self, title: str, body: str) -> str:
         """
-        Convert a question to Lean 4 theorem/definition.
+        Convert a question to Lean 4 theorem declaration (without proof).
 
         Args:
             title: Question title
@@ -129,12 +138,7 @@ class LeanConverter:
         """
         problem_text = f"Problem: {title}\n\n{body}"
 
-        prompt = f"""Convert the following mathematical problem statement to a Lean 4 theorem or definition.
-Focus on formalizing the mathematical statement itself.
-
-{problem_text}
-
-Provide the Lean 4 code with appropriate imports and structure."""
+        prompt = f"Use the following theorem names: problem_{title}.\n\n{problem_text}"
 
         lean_code = self.client.convert_to_lean(
             problem_text=prompt,
@@ -147,27 +151,26 @@ Provide the Lean 4 code with appropriate imports and structure."""
 
         return lean_code
 
-    def _convert_answer_to_lean(self, answer: str) -> str:
+    def _convert_answer_to_lean(self, title: str, body: str, answer: str) -> str:
         """
-        Convert an answer/solution to Lean 4 proof.
+        Convert a problem + solution to a complete Lean 4 theorem with proof.
 
         Args:
+            title: Question title
+            body: Question body
             answer: Answer text
 
         Returns:
-            Lean 4 code for the proof
+            Complete Lean 4 code with theorem declaration AND proof
         """
-        prompt = f"""Convert the following mathematical solution or proof to Lean 4.
-This should be a proof that can be used with the corresponding theorem.
+        # Combine problem and solution
+        problem_text = f"Problem: {title}\n\n{body}\n\nSolution: {answer}"
 
-Solution/Proof:
-{answer}
-
-Provide the Lean 4 proof code with appropriate structure."""
+        prompt = f"Use the following theorem names: theorem_{title}.\n\n{problem_text}"
 
         lean_code = self.client.convert_to_lean(
             problem_text=prompt,
-            max_tokens=2048,
+            max_tokens=4096,  # More tokens for complete theorem + proof
             temperature=0.6
         )
 
@@ -178,23 +181,21 @@ Provide the Lean 4 proof code with appropriate structure."""
 
     def _combine_lean_code(self, question_lean: str, answer_lean: str = None) -> str:
         """
-        Combine question and answer Lean code into a complete formalization.
+        Combine question and answer Lean code.
 
         Args:
-            question_lean: Lean code for question (theorem/definition)
-            answer_lean: Lean code for answer (proof), if available
+            question_lean: Lean code for question (theorem declaration only, ends with ':= by')
+            answer_lean: Lean code for answer (complete theorem with proof), if available
 
         Returns:
-            Combined Lean 4 code
+            Combined Lean 4 code (answer_lean if available, otherwise question_lean)
         """
         if answer_lean:
-            # Combine question and answer
-            combined = f"{question_lean}\n\n{answer_lean}"
+            # answer_lean is already complete (theorem + proof from problem + solution)
+            return answer_lean
         else:
-            # Question only
-            combined = question_lean
-
-        return combined
+            # Only have question (theorem declaration without proof)
+            return question_lean
 
     def _is_program_error(self, error_msg: str) -> bool:
         """

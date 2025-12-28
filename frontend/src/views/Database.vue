@@ -261,16 +261,16 @@
 
             <!-- Show Lean code split into question and answer -->
             <div v-if="selectedQuestion.processing_status?.question_lean_code || selectedQuestion.processing_status?.lean_code">
-              <!-- Question Lean Code -->
+              <!-- Question Lean Code (Theorem Declaration Only) -->
               <div v-if="selectedQuestion.processing_status?.question_lean_code">
-                <h4>Question (Theorem/Definition)</h4>
+                <h4>Question (Theorem Declaration)</h4>
                 <pre class="code">{{ selectedQuestion.processing_status.question_lean_code }}</pre>
               </div>
 
-              <!-- Answer Lean Code -->
+              <!-- Answer Lean Code (Complete Theorem with Proof) -->
               <div v-if="selectedQuestion.processing_status?.answer_lean_code">
                 <el-divider style="margin: 1.5rem 0;" />
-                <h4>Answer (Proof)</h4>
+                <h4>Lean Theorem Statement (Complete with Proof)</h4>
                 <pre class="code">{{ selectedQuestion.processing_status.answer_lean_code }}</pre>
               </div>
 
