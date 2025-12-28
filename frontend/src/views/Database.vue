@@ -605,14 +605,19 @@ async function loadAvailableConverters() {
 
 // Show converter selection dialog
 async function showConverterClearDialog() {
-  await loadAvailableConverters()
-  if (availableConverters.value.length === 0) {
-    ElMessage.warning('No Lean conversion results found to clear')
-    return
+  try {
+    await loadAvailableConverters()
+    if (availableConverters.value.length === 0) {
+      ElMessage.warning('No Lean conversion results found to clear')
+      return
+    }
+    // Default: select all converters
+    selectedConvertersToClear.value = ['all']
+    converterDialogVisible.value = true
+  } catch (error) {
+    console.error('Error loading converters:', error)
+    ElMessage.error('Failed to load converters: ' + (error.message || 'Unknown error'))
   }
-  // Default: select all converters
-  selectedConvertersToClear.value = ['all']
-  converterDialogVisible.value = true
 }
 
 // Handle select all converters checkbox
