@@ -39,6 +39,8 @@ class Settings:
     lean_conversion_temperature: float = 0.6
     ocr_temperature: float = 0.1
     preprocessing_temperature: float = 0.2
+    preprocessing_concurrency: int = 2  # Number of concurrent LLM API calls
+    preprocessing_max_length: int = 16000  # Max token length for LLM calls
 
     # Paths
     base_dir: Path = field(default_factory=lambda: Path('/datadisk/Web2Lean'))

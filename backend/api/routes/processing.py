@@ -126,15 +126,22 @@ def start_preprocessing():
     try:
         from ...processing import LLMProcessor
 
+        settings = current_app.config['settings']
         processor = LLMProcessor(
             db_manager=db,
-            api_key=current_app.config['settings'].zhipu_api_key,
-            text_model=current_app.config['settings'].glm_text_model,
-            vision_model=current_app.config['settings'].glm_vision_model
+            api_key=settings.zhipu_api_key,
+            text_model=settings.glm_text_model,
+            vision_model=settings.glm_vision_model,
+            max_length=settings.preprocessing_max_length
         )
 
+        concurrency = settings.preprocessing_concurrency
+
         def process_questions():
-            for i, q in enumerate(questions):
+            # Process questions in batches with concurrency
+            batch_size = concurrency * 2  # Process in batches to avoid overwhelming the system
+
+            for batch_start in range(0, len(questions), batch_size):
                 # Check if task is paused
                 task.wait_if_paused()
 
@@ -142,40 +149,32 @@ def start_preprocessing():
                 if task.is_stopped():
                     break
 
-                if site_id and q['site_id'] != site_id:
+                batch = questions[batch_start:batch_start + batch_size]
+
+                # Filter by site_id if specified
+                if site_id:
+                    batch = [q for q in batch if q['site_id'] == site_id]
+
+                if not batch:
                     continue
 
-                task.current_question_id = q['id']
+                # Extract question IDs
+                question_ids = [q['id'] for q in batch]
 
-                # Add delay between requests to avoid rate limiting
-                if i > 0:
-                    time.sleep(2)  # Wait 2 seconds between requests
+                # Process batch concurrently
+                results = processor.process_questions_batch(
+                    question_ids,
+                    concurrency=concurrency
+                )
 
-                # Retry logic for rate limiting
-                max_retries = 3
-                success = False
-                for attempt in range(max_retries):
-                    try:
-                        processor.process_question(q['id'])
-                        success = True
-                        break  # Success, move to next question
-                    except Exception as e:
-                        error_str = str(e)
-                        if '429' in error_str or 'Too Many Requests' in error_str:
-                            # Rate limited - wait and retry
-                            if attempt < max_retries - 1:
-                                wait_time = (attempt + 1) * 5  # Exponential backoff: 5s, 10s, 15s
-                                print(f"Rate limited on question {q['id']}, waiting {wait_time}s before retry {attempt + 1}/{max_retries}")
-                                time.sleep(wait_time)
-                                continue
-                            else:
-                                print(f"Error preprocessing question {q['id']}: Rate limited after {max_retries} retries")
-                        else:
-                            # Other errors - don't retry
-                            print(f"Error preprocessing question {q['id']}: {e}")
-                            break
+                # Update task progress
+                for result in results:
+                    success = result.get('success', False)
+                    task.increment_progress(success=success)
 
-                task.increment_progress(success=success)
+                # Add delay between batches to avoid rate limiting
+                if batch_start + batch_size < len(questions):
+                    time.sleep(3)  # Wait 3 seconds between batches
 
             # Mark task as completed
             task.status = 'completed'
@@ -186,9 +185,10 @@ def start_preprocessing():
         thread.start()
 
         return jsonify({
-            'message': f'Started preprocessing for {len(questions)} questions',
+            'message': f'Started preprocessing for {len(questions)} questions with concurrency={concurrency}',
             'task_id': task.task_id,
             'count': len(questions),
+            'concurrency': concurrency,
             'progress': task.get_progress()
         })
 

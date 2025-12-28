@@ -3,7 +3,8 @@ LLM Processor for preprocessing mathematical content with improved answer handli
 """
 import json
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ..database import DatabaseManager
 from ..utils import ZhipuClient
@@ -17,7 +18,8 @@ BACKEND_VERSION = "1.0.1"
 class LLMProcessor:
     """Process questions using GLM-4V/4 for OCR and content correction."""
 
-    def __init__(self, db_manager: DatabaseManager, api_key: str, text_model: str = None, vision_model: str = None):
+    def __init__(self, db_manager: DatabaseManager, api_key: str, text_model: str = None,
+                 vision_model: str = None, max_length: int = 16000):
         """
         Initialize LLM processor.
 
@@ -26,10 +28,12 @@ class LLMProcessor:
             api_key: Zhipu API key
             text_model: Model name for text processing (default: from settings)
             vision_model: Model name for image OCR (default: from settings)
+            max_length: Max token length for LLM calls (default: 16000)
         """
         self.db = db_manager
         self.text_model = text_model or "glm-4.7"
         self.vision_model = vision_model or "glm-4.6v"
+        self.max_length = max_length
         self.client = ZhipuClient(api_key=api_key)
 
     def process_question(self, question_internal_id: int) -> Dict[str, Any]:
@@ -192,7 +196,8 @@ class LLMProcessor:
             result = self.client.correct_question_only(
                 question=question_text,
                 temperature=0.2,
-                model=self.text_model
+                model=self.text_model,
+                max_tokens=self.max_length
             )
 
             # Check if question is valid
@@ -229,7 +234,8 @@ class LLMProcessor:
                 question=question_text,
                 answer=answer_text,
                 temperature=0.2,
-                model=self.text_model
+                model=self.text_model,
+                max_tokens=self.max_length
             )
 
             # Check if question is valid
@@ -281,7 +287,8 @@ class LLMProcessor:
                 question=question_text,
                 answers=answers,
                 temperature=0.2,
-                model=self.text_model
+                model=self.text_model,
+                max_tokens=self.max_length
             )
 
             # Check if question is valid
@@ -408,3 +415,47 @@ Respond in JSON format:
         """Get current timestamp."""
         from datetime import datetime
         return datetime.now().isoformat()
+
+    def process_questions_batch(self, question_ids: List[int], concurrency: int = 2) -> List[Dict[str, Any]]:
+        """
+        Process multiple questions concurrently with ThreadPoolExecutor.
+
+        Args:
+            question_ids: List of question IDs to process
+            concurrency: Number of concurrent LLM API calls (default: 2)
+
+        Returns:
+            List of processing results
+        """
+        logger.info(f"Starting batch preprocessing of {len(question_ids)} questions with concurrency={concurrency}")
+
+        results = []
+        with ThreadPoolExecutor(max_workers=concurrency) as executor:
+            # Submit all tasks
+            future_to_qid = {
+                executor.submit(self.process_question, qid): qid
+                for qid in question_ids
+            }
+
+            # Process completed tasks
+            for future in as_completed(future_to_qid):
+                qid = future_to_qid[future]
+                try:
+                    result = future.result()
+                    results.append({
+                        'question_id': qid,
+                        'success': result.get('success', False),
+                        'status': result.get('status'),
+                        'result': result
+                    })
+                    logger.info(f"✓ Completed question {qid}: {result.get('status')}")
+                except Exception as e:
+                    logger.error(f"✗ Failed question {qid}: {e}")
+                    results.append({
+                        'question_id': qid,
+                        'success': False,
+                        'error': str(e)
+                    })
+
+        logger.info(f"Batch preprocessing complete: {len(results)}/{len(question_ids)} processed")
+        return results

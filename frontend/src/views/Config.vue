@@ -107,6 +107,16 @@
             <span style="margin-left: 10px; color: #999;">用于文本预处理和验证</span>
           </el-form-item>
 
+          <el-form-item label="Preprocessing Concurrency">
+            <el-input-number v-model="models.preprocessing_concurrency" :min="1" :max="8" :step="1" style="width: 200px" />
+            <span style="margin-left: 10px; color: #999;">并发调用 LLM API 的数量（默认2）</span>
+          </el-form-item>
+
+          <el-form-item label="Max Token Length">
+            <el-input-number v-model="models.preprocessing_max_length" :min="2000" :max="32000" :step="1000" style="width: 200px" />
+            <span style="margin-left: 10px; color: #999;">LLM 最大 token 数（默认16000）</span>
+          </el-form-item>
+
           <el-form-item label="Vision Model (图像OCR)">
             <el-select v-model="models.glm_vision_model" filterable allow-create style="width: 300px">
               <el-option label="GLM-4.6V (最新推荐)" value="glm-4.6v" />
@@ -239,7 +249,9 @@ const models = ref({
   glm_vision_model: 'glm-4.6v',
   glm_lean_model: 'local',
   vllm_base_url: 'http://localhost:8000/v1',
-  vllm_model_path: '/root/Kimina-Autoformalizer-7B'
+  vllm_model_path: '/root/Kimina-Autoformalizer-7B',
+  preprocessing_concurrency: 2,
+  preprocessing_max_length: 16000
 })
 
 // Site config dialog
@@ -349,7 +361,12 @@ function showAddScheduleDialog() {
 
 async function loadModels() {
   try {
-    models.value = await configApi.getModels()
+    const data = await configApi.getModels()
+    // Merge with existing models to preserve defaults
+    models.value = {
+      ...models.value,
+      ...data
+    }
   } catch (error) {
     ElMessage.error('Failed to load models')
   }

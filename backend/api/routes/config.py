@@ -114,6 +114,8 @@ def get_models():
         'glm_lean_model': lean_model,
         'vllm_base_url': settings.vllm_base_url,
         'vllm_model_path': settings.vllm_model_path,
+        'preprocessing_concurrency': settings.preprocessing_concurrency,
+        'preprocessing_max_length': settings.preprocessing_max_length,
     })
 
 
@@ -135,6 +137,14 @@ def update_models():
         # Convert 'local' back to empty string for internal use
         lean_model = data['glm_lean_model']
         settings.glm_lean_model = '' if lean_model == 'local' else lean_model
+    if 'vllm_base_url' in data:
+        settings.vllm_base_url = data['vllm_base_url']
+    if 'vllm_model_path' in data:
+        settings.vllm_model_path = data['vllm_model_path']
+    if 'preprocessing_concurrency' in data:
+        settings.preprocessing_concurrency = int(data['preprocessing_concurrency'])
+    if 'preprocessing_max_length' in data:
+        settings.preprocessing_max_length = int(data['preprocessing_max_length'])
 
     # Save to environment file (optional)
     try:
@@ -167,5 +177,9 @@ def update_models():
             'glm_text_model': settings.glm_text_model,
             'glm_vision_model': settings.glm_vision_model,
             'glm_lean_model': lean_model_response,
+            'vllm_base_url': settings.vllm_base_url,
+            'vllm_model_path': settings.vllm_model_path,
+            'preprocessing_concurrency': settings.preprocessing_concurrency,
+            'preprocessing_max_length': settings.preprocessing_max_length,
         }
     })

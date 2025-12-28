@@ -274,7 +274,8 @@ class ZhipuClient:
         question: str,
         answer: str,
         temperature: float = 0.0,
-        model: str = "glm-4.7"
+        model: str = "glm-4.7",
+        max_tokens: int = 16000
     ) -> Dict[str, Any]:
         """
         Validate and correct question/answer pair.
@@ -284,6 +285,7 @@ class ZhipuClient:
             answer: Answer text
             temperature: Sampling temperature (default 0.0 for deterministic output)
             model: Model to use (default: glm-4.7 for best quality)
+            max_tokens: Maximum tokens to generate (default: 16000)
 
         Returns:
             Correction result as dict
@@ -305,7 +307,7 @@ class ZhipuClient:
                 messages=messages,
                 model=model,
                 temperature=temp,
-                max_tokens=16000,
+                max_tokens=max_tokens,
                 response_format={"type": "json_object"}
             )
         except Exception:
@@ -314,7 +316,7 @@ class ZhipuClient:
                 messages=messages,
                 model=model,
                 temperature=temp,
-                max_tokens=16000
+                max_tokens=max_tokens
             )
 
         content = response["choices"][0]["message"]["content"]
@@ -345,7 +347,8 @@ class ZhipuClient:
         question: str,
         answers: list,
         temperature: float = 0.0,
-        model: str = "glm-4.7"
+        model: str = "glm-4.7",
+        max_tokens: int = 16000
     ) -> Dict[str, Any]:
         """
         Validate question with multiple answers and produce a single correct, complete, formalized answer.
@@ -355,6 +358,7 @@ class ZhipuClient:
             answers: List of answer dicts with 'body', 'is_accepted', 'score'
             temperature: Sampling temperature (default 0.0 for deterministic output)
             model: Model to use
+            max_tokens: Maximum tokens to generate (default: 16000)
 
         Returns:
             Validation result with corrected question and corrected answer
@@ -379,7 +383,7 @@ class ZhipuClient:
                 messages=messages,
                 model=model,
                 temperature=temp,
-                max_tokens=16000,
+                max_tokens=max_tokens,
                 response_format={"type": "json_object"}
             )
         except Exception:
@@ -388,7 +392,7 @@ class ZhipuClient:
                 messages=messages,
                 model=model,
                 temperature=temp,
-                max_tokens=16000
+                max_tokens=max_tokens
             )
 
         content = response["choices"][0]["message"]["content"]
@@ -418,7 +422,8 @@ class ZhipuClient:
         self,
         question: str,
         temperature: float = 0.0,
-        model: str = "glm-4.7"
+        model: str = "glm-4.7",
+        max_tokens: int = 16000
     ) -> Dict[str, Any]:
         """
         Validate and correct a question without an answer.
@@ -427,6 +432,7 @@ class ZhipuClient:
             question: Question text
             temperature: Sampling temperature (default 0.0 for deterministic output)
             model: Model to use
+            max_tokens: Maximum tokens to generate (default: 16000)
 
         Returns:
             Correction result as dict
@@ -445,7 +451,7 @@ class ZhipuClient:
                 messages=messages,
                 model=model,
                 temperature=temp,
-                max_tokens=16000,
+                max_tokens=max_tokens,
                 response_format={"type": "json_object"}
             )
         except Exception:
@@ -454,7 +460,7 @@ class ZhipuClient:
                 messages=messages,
                 model=model,
                 temperature=temp,
-                max_tokens=16000
+                max_tokens=max_tokens
             )
 
         content = response["choices"][0]["message"]["content"]
