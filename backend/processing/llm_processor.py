@@ -139,6 +139,7 @@ class LLMProcessor:
                 preprocessed_answer=result.get('preprocessed_answer'),
                 theorem_name=theorem_name,
                 correction_notes=result.get('correction_notes'),
+                formalization_value=result.get('formalization_value'),
                 preprocessing_version=BACKEND_VERSION,
                 processing_completed_at=self._now()
             )

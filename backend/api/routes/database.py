@@ -322,3 +322,166 @@ def export_verified_lean():
         )
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@database_bp.route('/questions/<int:question_id>/lean-conversions', methods=['GET', 'OPTIONS'])
+def get_lean_conversions(question_id: int):
+    """Get all Lean conversion results for a question."""
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    db = current_app.config['db']
+
+    # Verify question exists
+    question = db.get_question(question_id)
+    if not question:
+        return jsonify({'error': 'Question not found'}), 404
+
+    results = db.get_lean_conversion_results(question_id)
+    return jsonify({'results': results})
+
+
+@database_bp.route('/lean-conversions/<int:result_id>', methods=['PUT', 'OPTIONS'])
+def update_lean_conversion(result_id: int):
+    """Update a Lean conversion result (mainly for verification)."""
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    data = request.get_json() or {}
+    db = current_app.config['db']
+
+    try:
+        success = db.update_lean_verification(
+            result_id=result_id,
+            verification_status=data.get('verification_status'),
+            has_errors=data.get('verification_has_errors', False),
+            has_warnings=data.get('verification_has_warnings', False),
+            messages=data.get('verification_messages'),
+            verification_time=data.get('verification_time')
+        )
+
+        if success:
+            return jsonify({'message': 'Lean conversion result updated successfully'})
+        else:
+            return jsonify({'error': 'Result not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@database_bp.route('/lean-conversions/converters', methods=['GET', 'OPTIONS'])
+def get_converters():
+    """Get list of all available converters."""
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    db = current_app.config['db']
+
+    try:
+        converters = db.get_available_converters()
+        return jsonify({'converters': converters})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@database_bp.route('/lean-conversions/clear', methods=['POST', 'OPTIONS'])
+def clear_lean_conversions():
+    """Clear Lean conversion results for specific converters."""
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    data = request.get_json() or {}
+    converters = data.get('converters', [])  # List of converter names, or ['all'] for all
+
+    db = current_app.config['db']
+    session = db.get_session()
+
+    try:
+        from backend.database.schema import LeanConversionResult, ProcessingStatus
+
+        if not converters or len(converters) == 0:
+            return jsonify({'error': 'No converters specified'}), 400
+
+        # Count before deletion
+        if 'all' in converters:
+            # Clear all conversion results
+            conversion_count = session.query(LeanConversionResult).count()
+            session.query(LeanConversionResult).delete()
+
+            # Also clear legacy lean_code fields in processing_status
+            legacy_count = session.query(ProcessingStatus).filter(
+                (ProcessingStatus.lean_code.isnot(None)) |
+                (ProcessingStatus.question_lean_code.isnot(None)) |
+                (ProcessingStatus.answer_lean_code.isnot(None))
+            ).count()
+
+            session.query(ProcessingStatus).filter(
+                (ProcessingStatus.lean_code.isnot(None)) |
+                (ProcessingStatus.question_lean_code.isnot(None)) |
+                (ProcessingStatus.answer_lean_code.isnot(None))
+            ).update({
+                ProcessingStatus.lean_code: None,
+                ProcessingStatus.question_lean_code: None,
+                ProcessingStatus.answer_lean_code: None,
+                ProcessingStatus.lean_error: None,
+                ProcessingStatus.status: 'preprocessed',
+                ProcessingStatus.verification_status: None,
+                ProcessingStatus.verification_has_errors: None,
+                ProcessingStatus.verification_has_warnings: None,
+                ProcessingStatus.verification_messages: None,
+                ProcessingStatus.verification_error: None,
+                ProcessingStatus.verification_time: None,
+                ProcessingStatus.verification_completed_at: None
+            }, synchronize_session=False)
+
+            session.commit()
+            total_count = conversion_count + legacy_count
+            return jsonify({'message': f'Cleared all {total_count} Lean conversion results ({conversion_count} from converters, {legacy_count} legacy)'})
+
+        elif 'legacy' in converters:
+            # Clear only legacy lean_code fields in processing_status
+            legacy_count = session.query(ProcessingStatus).filter(
+                (ProcessingStatus.lean_code.isnot(None)) |
+                (ProcessingStatus.question_lean_code.isnot(None)) |
+                (ProcessingStatus.answer_lean_code.isnot(None))
+            ).count()
+
+            session.query(ProcessingStatus).filter(
+                (ProcessingStatus.lean_code.isnot(None)) |
+                (ProcessingStatus.question_lean_code.isnot(None)) |
+                (ProcessingStatus.answer_lean_code.isnot(None))
+            ).update({
+                ProcessingStatus.lean_code: None,
+                ProcessingStatus.question_lean_code: None,
+                ProcessingStatus.answer_lean_code: None,
+                ProcessingStatus.lean_error: None,
+                ProcessingStatus.status: 'preprocessed',
+                ProcessingStatus.verification_status: None,
+                ProcessingStatus.verification_has_errors: None,
+                ProcessingStatus.verification_has_warnings: None,
+                ProcessingStatus.verification_messages: None,
+                ProcessingStatus.verification_error: None,
+                ProcessingStatus.verification_time: None,
+                ProcessingStatus.verification_completed_at: None
+            }, synchronize_session=False)
+
+            session.commit()
+            return jsonify({'message': f'Cleared {legacy_count} legacy Lean conversion results'})
+
+        else:
+            # Clear specific converters (excluding legacy)
+            count = session.query(LeanConversionResult).filter(
+                LeanConversionResult.converter_name.in_(converters)
+            ).count()
+
+            session.query(LeanConversionResult).filter(
+                LeanConversionResult.converter_name.in_(converters)
+            ).delete()
+
+            session.commit()
+            return jsonify({'message': f'Cleared {count} Lean conversion results from {len(converters)} converter(s)'})
+
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()

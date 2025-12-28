@@ -251,6 +251,12 @@
                   <div style="margin-top: 0.5rem; white-space: pre-wrap;">{{ selectedQuestion.processing_status.correction_notes }}</div>
                 </el-alert>
               </div>
+
+              <div v-if="selectedQuestion.processing_status.formalization_value" style="margin-top: 1rem;">
+                <el-tag :type="formalizationTagType(selectedQuestion.processing_status.formalization_value)">
+                  Formalization Value: {{ selectedQuestion.processing_status.formalization_value }}
+                </el-tag>
+              </div>
             </div>
 
             <!-- Not processed yet -->
@@ -259,21 +265,42 @@
 
           <!-- Lean Code -->
           <el-tab-pane label="Lean Code" name="lean">
+            <!-- Converter Selector -->
+            <div v-if="leanConversions && leanConversions.length > 0" style="margin-bottom: 1rem;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-weight: 600;">Converter:</span>
+                <el-select v-model="selectedConverter" style="width: 250px;">
+                  <el-option
+                    v-for="conv in leanConversions"
+                    :key="conv.converter_name"
+                    :label="`${conv.converter_name} (${conv.converter_type})`"
+                    :value="conv.converter_name"
+                  >
+                    <span>{{ conv.converter_name }}</span>
+                    <el-tag size="small" style="margin-left: 8px;">{{ conv.converter_type }}</el-tag>
+                  </el-option>
+                </el-select>
+                <el-tag v-if="getCurrentConversion()" :type="getVerificationStatusType(getCurrentConversion().verification_status)">
+                  {{ getCurrentConversion().verification_status }}
+                </el-tag>
+              </div>
+            </div>
+
             <!-- Show verification status -->
-            <div v-if="selectedQuestion.processing_status?.verification_status && selectedQuestion.processing_status.verification_status !== 'not_verified'" style="margin-bottom: 1rem;">
+            <div v-if="getCurrentConversion() && getCurrentConversion().verification_status && getCurrentConversion().verification_status !== 'not_verified'" style="margin-bottom: 1rem;">
               <el-alert
-                :type="getVerificationStatusType(selectedQuestion.processing_status.verification_status)"
+                :type="getVerificationStatusType(getCurrentConversion().verification_status)"
                 :closable="false"
               >
                 <template #title>
-                  <strong>Verification Status: {{ selectedQuestion.processing_status.verification_status }}</strong>
+                  <strong>Verification Status: {{ getCurrentConversion().verification_status }}</strong>
                 </template>
-                <div v-if="selectedQuestion.processing_status.verification_time" style="margin-top: 0.5rem;">
-                  Time: {{ selectedQuestion.processing_status.verification_time.toFixed(3) }}s
+                <div v-if="getCurrentConversion().verification_time" style="margin-top: 0.5rem;">
+                  Time: {{ getCurrentConversion().verification_time.toFixed(3) }}s
                 </div>
                 <!-- Show verification messages if any -->
-                <div v-if="selectedQuestion.processing_status.verification_messages && selectedQuestion.processing_status.verification_messages.length > 0" style="margin-top: 0.5rem;">
-                  <div v-for="(msg, idx) in selectedQuestion.processing_status.verification_messages" :key="idx" style="margin-top: 0.25rem;">
+                <div v-if="getCurrentConversion().verification_messages && getCurrentConversion().verification_messages.length > 0" style="margin-top: 0.5rem;">
+                  <div v-for="(msg, idx) in getCurrentConversion().verification_messages" :key="idx" style="margin-top: 0.25rem;">
                     <el-tag :type="msg.severity === 'error' ? 'danger' : msg.severity === 'warning' ? 'warning' : 'info'" size="small">
                       Line {{ msg.line }}: {{ msg.message }}
                     </el-tag>
@@ -283,15 +310,37 @@
             </div>
 
             <!-- Show Lean conversion error first -->
-            <div v-if="selectedQuestion.processing_status?.lean_error" style="margin-bottom: 1rem;">
+            <div v-if="getCurrentConversion() && getCurrentConversion().error_message" style="margin-bottom: 1rem;">
               <el-alert type="error" :closable="false">
                 <strong>Lean Conversion Failed:</strong>
-                <div style="margin-top: 0.5rem; white-space: pre-wrap;">{{ selectedQuestion.processing_status.lean_error }}</div>
+                <div style="margin-top: 0.5rem; white-space: pre-wrap;">{{ getCurrentConversion().error_message }}</div>
               </el-alert>
             </div>
 
             <!-- Show Lean code split into question and answer -->
-            <div v-if="selectedQuestion.processing_status?.question_lean_code || selectedQuestion.processing_status?.lean_code">
+            <div v-if="getCurrentConversion() && (getCurrentConversion().question_lean_code || getCurrentConversion().answer_lean_code)">
+              <!-- Question Lean Code (Theorem Declaration Only) -->
+              <div v-if="getCurrentConversion().question_lean_code">
+                <h4>Question (Theorem Declaration)</h4>
+                <pre class="code">{{ getCurrentConversion().question_lean_code }}</pre>
+              </div>
+
+              <!-- Answer Lean Code (Complete Theorem with Proof) -->
+              <div v-if="getCurrentConversion().answer_lean_code">
+                <el-divider style="margin: 1.5rem 0;" />
+                <h4>Lean Theorem Statement (Complete with Proof)</h4>
+                <pre class="code">{{ getCurrentConversion().answer_lean_code }}</pre>
+              </div>
+            </div>
+
+            <!-- Fallback: Show old lean_code if no conversion results -->
+            <div v-else-if="selectedQuestion.processing_status?.question_lean_code || selectedQuestion.processing_status?.lean_code">
+              <div style="margin-bottom: 1rem;">
+                <el-alert type="info" :closable="false">
+                  <strong>Legacy Lean Code (from processing_status)</strong>
+                </el-alert>
+              </div>
+
               <!-- Question Lean Code (Theorem Declaration Only) -->
               <div v-if="selectedQuestion.processing_status?.question_lean_code">
                 <h4>Question (Theorem Declaration)</h4>
@@ -317,6 +366,60 @@
           </el-tab-pane>
         </el-tabs>
       </div>
+    </el-dialog>
+
+    <!-- Converter Selection Dialog for Clearing Lean Code -->
+    <el-dialog
+      v-model="converterDialogVisible"
+      title="Clear Lean Conversion Results"
+      width="600px"
+    >
+      <el-alert type="warning" :closable="false" style="margin-bottom: 1rem;">
+        Select which converter(s) to clear. This will remove all Lean conversion results from the selected converter(s).
+      </el-alert>
+
+      <div style="margin-bottom: 1rem;">
+        <el-checkbox
+          :model-value="selectedConvertersToClear.includes('all')"
+          :indeterminate="selectedConvertersToClear.length > 0 && !selectedConvertersToClear.includes('all')"
+          @change="handleSelectAllConverters"
+        >
+          <strong>All Converters</strong>
+        </el-checkbox>
+      </div>
+
+      <el-divider style="margin: 1rem 0;" />
+
+      <div v-if="availableConverters.length > 0">
+        <el-checkbox-group v-model="selectedConvertersToClear">
+          <div v-for="converter in availableConverters" :key="converter.converter_name" style="margin-bottom: 0.5rem;">
+            <el-checkbox :label="converter.converter_name" :disabled="selectedConvertersToClear.includes('all')">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <strong>{{ converter.converter_name }}</strong>
+                <el-tag size="small" type="info">{{ converter.converter_type }}</el-tag>
+                <span style="color: #666; font-size: 0.9em;">({{ converter.count }} results)</span>
+              </div>
+            </el-checkbox>
+          </div>
+        </el-checkbox-group>
+      </div>
+      <div v-else style="text-align: center; color: #999; padding: 2rem;">
+        No converters available
+      </div>
+
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="converterDialogVisible = false">Cancel</el-button>
+          <el-button
+            type="danger"
+            @click="clearSelectedConverters"
+            :loading="clearingConverters"
+            :disabled="selectedConvertersToClear.length === 0"
+          >
+            Clear Selected
+          </el-button>
+        </span>
+      </template>
     </el-dialog>
   </div>
 </template>
@@ -353,6 +456,16 @@ const activeTab = ref('raw')
 const clearing = ref(false)
 const verifying = ref(false)
 const exporting = ref(false)
+
+// Multi-converter support
+const leanConversions = ref([])  // All available conversion results
+const selectedConverter = ref('kimina-7b')  // Currently selected converter
+
+// Converter selection dialog for clearing
+const converterDialogVisible = ref(false)
+const availableConverters = ref([])
+const selectedConvertersToClear = ref([])
+const clearingConverters = ref(false)
 
 // Sort answers: accepted first, then by score
 const sortedAnswers = computed(() => {
@@ -403,14 +516,34 @@ function jumpToPage() {
   loadQuestions()
 }
 
-function showDetail(row) {
-  databaseApi.getQuestion(row.id).then(q => {
+async function showDetail(row) {
+  try {
+    const q = await databaseApi.getQuestion(row.id)
     selectedQuestion.value = q
     detailVisible.value = true
     activeTab.value = 'raw'
-  }).catch(() => {
+
+    // Load lean conversion results
+    try {
+      const response = await fetch(`http://localhost:5000/api/database/questions/${row.id}/lean-conversions`)
+      const data = await response.json()
+      leanConversions.value = data.results || []
+
+      // Select first available converter or default to kimina-7b
+      if (leanConversions.value.length > 0) {
+        // Check if current selection exists in results
+        const hasCurrent = leanConversions.value.some(c => c.converter_name === selectedConverter.value)
+        if (!hasCurrent) {
+          selectedConverter.value = leanConversions.value[0].converter_name
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load lean conversions:', error)
+      leanConversions.value = []
+    }
+  } catch (error) {
     ElMessage.error('Failed to load question detail')
-  })
+  }
 }
 
 function getStatusType(status) {
@@ -422,6 +555,22 @@ function getStatusType(status) {
     cant_convert: 'warning'
   }
   return types[status] || 'info'
+}
+
+function formalizationTagType(value) {
+  const types = {
+    low: 'info',
+    medium: 'warning',
+    high: 'success'
+  }
+  return types[value] || 'info'
+}
+
+function getCurrentConversion() {
+  if (!leanConversions.value || leanConversions.value.length === 0) {
+    return null
+  }
+  return leanConversions.value.find(c => c.converter_name === selectedConverter.value) || leanConversions.value[0]
 }
 
 function getVerificationStatus(row) {
@@ -442,9 +591,78 @@ function getVerificationStatusLabel(status) {
   return labels[status] || status
 }
 
+// Load available converters for clearing dialog
+async function loadAvailableConverters() {
+  try {
+    const response = await fetch('http://localhost:5000/api/database/lean-conversions/converters')
+    const data = await response.json()
+    availableConverters.value = data.converters || []
+  } catch (error) {
+    ElMessage.error('Failed to load converters')
+    console.error(error)
+  }
+}
+
+// Show converter selection dialog
+async function showConverterClearDialog() {
+  await loadAvailableConverters()
+  if (availableConverters.value.length === 0) {
+    ElMessage.warning('No Lean conversion results found to clear')
+    return
+  }
+  // Default: select all converters
+  selectedConvertersToClear.value = ['all']
+  converterDialogVisible.value = true
+}
+
+// Handle select all converters checkbox
+function handleSelectAllConverters(checked) {
+  if (checked) {
+    selectedConvertersToClear.value = ['all']
+  } else {
+    selectedConvertersToClear.value = []
+  }
+}
+
+// Clear selected converters
+async function clearSelectedConverters() {
+  if (selectedConvertersToClear.value.length === 0) {
+    ElMessage.warning('Please select at least one converter')
+    return
+  }
+
+  try {
+    clearingConverters.value = true
+    const response = await fetch('http://localhost:5000/api/database/lean-conversions/clear', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ converters: selectedConvertersToClear.value })
+    })
+    const data = await response.json()
+
+    if (response.ok) {
+      ElMessage.success(data.message)
+      converterDialogVisible.value = false
+      await loadQuestions()
+    } else {
+      ElMessage.error(data.error || 'Failed to clear converters')
+    }
+  } catch (error) {
+    ElMessage.error('Failed to clear converters')
+    console.error(error)
+  } finally {
+    clearingConverters.value = false
+  }
+}
+
 async function clearAll(stage) {
+  // For Lean clearing, show converter selection dialog
+  if (stage === 'lean') {
+    await showConverterClearDialog()
+    return
+  }
+
   const titles = {
-    lean: 'Clear All Lean Code',
     verification: 'Clear All Verification Status',
     preprocess: 'Clear All Preprocessed Data',
     failed: 'Clear All Failed Questions',
@@ -452,7 +670,6 @@ async function clearAll(stage) {
   }
 
   const warnings = {
-    lean: 'This will remove all Lean code from all questions. Questions will revert to "preprocessed" status.',
     verification: 'This will remove all verification status but keep Lean code. You can re-verify questions.',
     preprocess: 'This will remove all preprocessed data and Lean code. Questions will revert to "raw" status.',
     failed: 'This will reset all failed questions to "raw" status, clearing all error data. You can retry processing them.',

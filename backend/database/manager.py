@@ -12,7 +12,7 @@ from sqlalchemy.pool import StaticPool
 
 from .schema import (
     Base, Site, Question, Answer, Image, ProcessingStatus,
-    CrawlerRun, ScheduledTask
+    CrawlerRun, ScheduledTask, LeanConversionResult
 )
 
 
@@ -279,6 +279,7 @@ class DatabaseManager:
                     'correction_notes': ps.correction_notes if ps else None,
                     'theorem_name': ps.theorem_name if ps else None,
                     'preprocessing_version': ps.preprocessing_version if ps else None,
+                    'formalization_value': ps.formalization_value if ps else None,
                     'preprocessing_error': ps.preprocessing_error if ps else None,
                     'question_lean_code': ps.question_lean_code if ps else None,
                     'answer_lean_code': ps.answer_lean_code if ps else None,
@@ -618,5 +619,146 @@ class DatabaseManager:
                 }
                 for run, site in runs
             ]
+        finally:
+            session.close()
+
+    # ===== Lean Conversion Results =====
+
+    def save_lean_conversion_result(self, question_id: int, converter_name: str,
+                                   converter_type: str, question_lean_code: str = None,
+                                   answer_lean_code: str = None, conversion_time: float = None,
+                                   error_message: str = None) -> LeanConversionResult:
+        """Save or update a Lean conversion result from a specific converter."""
+        session = self.get_session()
+        try:
+            # Check if result already exists for this converter
+            result = session.query(LeanConversionResult).filter(
+                LeanConversionResult.question_id == question_id,
+                LeanConversionResult.converter_name == converter_name
+            ).first()
+
+            if result:
+                # Update existing result
+                if question_lean_code is not None:
+                    result.question_lean_code = question_lean_code
+                if answer_lean_code is not None:
+                    result.answer_lean_code = answer_lean_code
+                if conversion_time is not None:
+                    result.conversion_time = conversion_time
+                if error_message is not None:
+                    result.error_message = error_message
+            else:
+                # Create new result
+                result = LeanConversionResult(
+                    question_id=question_id,
+                    converter_name=converter_name,
+                    converter_type=converter_type,
+                    question_lean_code=question_lean_code,
+                    answer_lean_code=answer_lean_code,
+                    conversion_time=conversion_time,
+                    error_message=error_message
+                )
+                session.add(result)
+
+            session.commit()
+            session.refresh(result)
+            return result
+        finally:
+            session.close()
+
+    def get_lean_conversion_results(self, question_id: int) -> List[Dict[str, Any]]:
+        """Get all Lean conversion results for a question."""
+        session = self.get_session()
+        try:
+            results = session.query(LeanConversionResult).filter(
+                LeanConversionResult.question_id == question_id
+            ).order_by(LeanConversionResult.created_at.desc()).all()
+
+            return [
+                {
+                    'id': r.id,
+                    'converter_name': r.converter_name,
+                    'converter_type': r.converter_type,
+                    'question_lean_code': r.question_lean_code,
+                    'answer_lean_code': r.answer_lean_code,
+                    'verification_status': r.verification_status,
+                    'verification_has_errors': r.verification_has_errors,
+                    'verification_has_warnings': r.verification_has_warnings,
+                    'verification_messages': json.loads(r.verification_messages) if r.verification_messages else [],
+                    'verification_time': r.verification_time,
+                    'conversion_time': r.conversion_time,
+                    'error_message': r.error_message,
+                    'created_at': r.created_at
+                }
+                for r in results
+            ]
+        finally:
+            session.close()
+
+    def update_lean_verification(self, result_id: int, verification_status: str,
+                                has_errors: bool = False, has_warnings: bool = False,
+                                messages: list = None, verification_time: float = None):
+        """Update verification status for a Lean conversion result."""
+        session = self.get_session()
+        try:
+            result = session.query(LeanConversionResult).filter(
+                LeanConversionResult.id == result_id
+            ).first()
+
+            if result:
+                result.verification_status = verification_status
+                result.verification_has_errors = has_errors
+                result.verification_has_warnings = has_warnings
+                if messages is not None:
+                    result.verification_messages = json.dumps(messages)
+                if verification_time is not None:
+                    result.verification_time = verification_time
+
+                session.commit()
+                return True
+            return False
+        finally:
+            session.close()
+
+    def get_available_converters(self) -> List[Dict[str, Any]]:
+        """Get list of all available converters with counts."""
+        session = self.get_session()
+        try:
+            from sqlalchemy import distinct
+
+            # Get unique converter names and types
+            converters = session.query(
+                LeanConversionResult.converter_name,
+                LeanConversionResult.converter_type,
+                func.count(LeanConversionResult.id).label('count')
+            ).group_by(
+                LeanConversionResult.converter_name,
+                LeanConversionResult.converter_type
+            ).all()
+
+            result = [
+                {
+                    'converter_name': name,
+                    'converter_type': conv_type,
+                    'count': count
+                }
+                for name, conv_type, count in converters
+            ]
+
+            # Check for legacy lean data in processing_status
+            legacy_count = session.query(ProcessingStatus).filter(
+                (ProcessingStatus.lean_code.isnot(None)) |
+                (ProcessingStatus.question_lean_code.isnot(None)) |
+                (ProcessingStatus.answer_lean_code.isnot(None))
+            ).count()
+
+            if legacy_count > 0:
+                result.append({
+                    'converter_name': 'legacy',
+                    'converter_type': 'legacy',
+                    'count': legacy_count
+                })
+
+            return result
         finally:
             session.close()
