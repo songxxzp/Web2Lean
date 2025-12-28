@@ -159,9 +159,9 @@ function getPreprocessingSuccessRate() {
 }
 
 function getVerificationPassRate() {
-  const total = verificationStats.total_checked || 0
-  const passed = (verificationStats.passed || 0) + (verificationStats.warning || 0)
-  return total > 0 ? Math.round((passed / total) * 100) : 0
+  const total = verificationStats.value.total_checked || 0
+  const verified = verificationStats.value.total_verified || 0
+  return total > 0 ? Math.round((verified / total) * 100) : 0
 }
 
 function getProgressColor(percentage) {

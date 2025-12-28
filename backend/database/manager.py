@@ -540,25 +540,22 @@ class DatabaseManager:
         """Get detailed Lean verification statistics."""
         session = self.get_session()
         try:
-            # Count conversions by verification status from lean_conversion_results table
-            from sqlalchemy import text
+            # Count by verification status from processing_status table
+            # Only count records that have actually been verified (passed, warning, or failed)
+            passed = session.query(func.count(ProcessingStatus.id)).filter(
+                ProcessingStatus.verification_status == 'passed'
+            ).scalar() or 0
 
-            # Use a query to count verification statuses
-            result = session.execute(text("""
-                SELECT
-                    COUNT(*) as total_checked,
-                    SUM(CASE WHEN verification_status = 'passed' THEN 1 ELSE 0 END) as passed,
-                    SUM(CASE WHEN verification_status = 'warning' THEN 1 ELSE 0 END) as warning,
-                    SUM(CASE WHEN verification_status = 'failed' THEN 1 ELSE 0 END) as failed,
-                    SUM(CASE WHEN verification_status = 'not_verified' THEN 1 ELSE 0 END) as not_verified
-                FROM lean_conversion_results
-            """)).fetchone()
+            warning = session.query(func.count(ProcessingStatus.id)).filter(
+                ProcessingStatus.verification_status == 'warning'
+            ).scalar() or 0
 
-            total_checked = result[0] or 0
-            passed = result[1] or 0
-            warning = result[2] or 0
-            failed = result[3] or 0
-            not_verified = result[4] or 0
+            failed = session.query(func.count(ProcessingStatus.id)).filter(
+                ProcessingStatus.verification_status == 'failed'
+            ).scalar() or 0
+
+            # Total checked = passed + warning + failed (only actually verified records)
+            total_checked = passed + warning + failed
 
             # passed + warning = verified successfully
             total_verified = passed + warning
@@ -568,7 +565,6 @@ class DatabaseManager:
                 'passed': passed,
                 'warning': warning,
                 'failed': failed,
-                'not_verified': not_verified,
                 'total_verified': total_verified,
             }
         finally:
