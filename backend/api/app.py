@@ -5,13 +5,15 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 import logging
 from pathlib import Path
+import atexit
 
 from ..config import get_settings
 from ..database import DatabaseManager
 from ..version import BACKEND_VERSION
+from ..scheduler import TaskScheduler
 from .routes import (
     crawlers_bp, statistics_bp, processing_bp,
-    database_bp, config_bp, verification_bp
+    database_bp, config_bp, verification_bp, scheduler_bp
 )
 
 
@@ -47,6 +49,14 @@ def create_app(config_path: str = None) -> Flask:
     # Clean up any stuck preprocessing status from previous runs
     cleanup_stuck_preprocessing(app)
 
+    # Initialize and start task scheduler
+    task_scheduler = TaskScheduler(app.config['db'], settings)
+    task_scheduler.start()
+    app.config['task_scheduler'] = task_scheduler
+
+    # Register shutdown handler for scheduler
+    atexit.register(lambda: task_scheduler.shutdown())
+
     # Register blueprints
     app.register_blueprint(crawlers_bp, url_prefix='/api/crawlers')
     app.register_blueprint(statistics_bp, url_prefix='/api/statistics')
@@ -54,6 +64,7 @@ def create_app(config_path: str = None) -> Flask:
     app.register_blueprint(database_bp, url_prefix='/api/database')
     app.register_blueprint(config_bp, url_prefix='/api/config')
     app.register_blueprint(verification_bp, url_prefix='/api/verification')
+    app.register_blueprint(scheduler_bp, url_prefix='/api/scheduler')
 
     # Root endpoint
     @app.route('/')

@@ -192,14 +192,17 @@ class ScheduledTask(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     task_name = Column(String(100), unique=True, nullable=False, index=True)
-    task_type = Column(Text, nullable=False)  # 'crawl', 'convert_lean', 'preprocess'
+    task_type = Column(Text, nullable=False)  # 'crawl', 'preprocess', 'convert_lean', 'verify'
     site_id = Column(Integer, ForeignKey('sites.site_id'))
-    interval_hours = Column(Integer)
-    interval_minutes = Column(Integer)
+    interval_days = Column(Integer, default=0)
+    interval_hours = Column(Integer, default=24)
+    interval_minutes = Column(Integer, default=0)
     last_run = Column(Text)
     next_run = Column(Text)
-    enabled = Column(Boolean, default=True)
-    config_json = Column(Text)  # Additional task configuration
+    enabled = Column(Boolean, default=False)  # Default disabled
+    config_json = Column(Text)  # Additional task configuration (converter_name, limit, etc.)
+    created_at = Column(Text, default=lambda: datetime.now().isoformat())
+    updated_at = Column(Text, default=lambda: datetime.now().isoformat(), onupdate=lambda: datetime.now().isoformat())
 
     __table_args__ = (
         Index('idx_scheduled_tasks_type', 'task_type'),

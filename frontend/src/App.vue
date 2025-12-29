@@ -7,6 +7,7 @@
         <router-link to="/crawlers">Crawlers</router-link>
         <router-link to="/processing">Processing</router-link>
         <router-link to="/database">Database</router-link>
+        <router-link to="/scheduler">Scheduler</router-link>
         <router-link to="/config">Configuration</router-link>
       </nav>
     </header>

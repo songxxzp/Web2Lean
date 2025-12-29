@@ -15,7 +15,7 @@ def get_sites():
 
     db = current_app.config['db']
     sites = db.get_sites()
-    return jsonify(sites)
+    return jsonify({'sites': sites})
 
 
 @config_bp.route('/sites/<int:site_id>', methods=['PUT', 'OPTIONS'])

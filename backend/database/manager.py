@@ -977,3 +977,59 @@ class DatabaseManager:
             return result
         finally:
             session.close()
+
+    def get_questions_not_converted_by(self, converter_name: str, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get preprocessed questions that haven't been converted by a specific converter."""
+        session = self.get_session()
+        try:
+            # Get preprocessed question IDs
+            preprocessed_ids = session.query(ProcessingStatus.question_id).filter(
+                ProcessingStatus.status == 'preprocessed'
+            ).subquery()
+
+            # Get question IDs already converted by this converter
+            converted_ids = session.query(LeanConversionResult.question_id).filter(
+                LeanConversionResult.converter_name == converter_name
+            ).subquery()
+
+            # Find preprocessed questions not converted by this converter
+            results = session.query(Question).filter(
+                Question.id.in_(preprocessed_ids),
+                ~Question.id.in_(converted_ids)
+            ).limit(limit).all()
+
+            return [
+                {
+                    'id': q.id,
+                    'title': q.title
+                }
+                for q in results
+            ]
+        finally:
+            session.close()
+
+    def get_unverified_conversions(self, converter_name: str = None, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get Lean conversions that haven't been verified yet."""
+        session = self.get_session()
+        try:
+            query = session.query(LeanConversionResult).filter(
+                LeanConversionResult.verification_status.in_(
+                    ['not_verified', None]
+                )
+            )
+
+            if converter_name:
+                query = query.filter(LeanConversionResult.converter_name == converter_name)
+
+            results = query.limit(limit).all()
+
+            return [
+                {
+                    'id': r.id,
+                    'question_id': r.question_id,
+                    'converter_name': r.converter_name
+                }
+                for r in results
+            ]
+        finally:
+            session.close()
