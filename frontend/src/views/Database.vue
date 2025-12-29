@@ -76,6 +76,14 @@
           </el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="Quality" width="130">
+        <template #default="{ row }">
+          <el-tag v-if="row.processing_status?.formalization_value" :type="getFormalizationValueType(row.processing_status.formalization_value)">
+            {{ row.processing_status.formalization_value }}
+          </el-tag>
+          <span v-else style="color: #999;">-</span>
+        </template>
+      </el-table-column>
       <el-table-column label="Verification" width="150">
         <template #default="{ row }">
           <el-tag v-if="getVerificationStatus(row)" :type="getVerificationStatusType(getVerificationStatus(row))">
@@ -558,6 +566,15 @@ function getStatusType(status) {
 }
 
 function formalizationTagType(value) {
+  const types = {
+    low: 'info',
+    medium: 'warning',
+    high: 'success'
+  }
+  return types[value] || 'info'
+}
+
+function getFormalizationValueType(value) {
   const types = {
     low: 'info',
     medium: 'warning',

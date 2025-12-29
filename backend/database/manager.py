@@ -369,6 +369,7 @@ class DatabaseManager:
                         'verification_status': ps.verification_status if ps else None,
                         'theorem_name': ps.theorem_name if ps else None,
                         'preprocessing_version': ps.preprocessing_version if ps else None,
+                        'formalization_value': ps.formalization_value if ps else None,
                     }
                 }
                 for q, ps, actual_answers in results

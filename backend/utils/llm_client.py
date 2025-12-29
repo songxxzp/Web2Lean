@@ -339,7 +339,7 @@ class ZhipuClient:
                 "corrected_answer": answer,
                 "correction_notes": f"JSON parsing failed, assuming valid: {str(e)[:50]}",
                 "worth_formalizing": True,
-                "formalization_value": "medium"
+                "formalization_value": None
             }
 
     def validate_and_select_answer(
@@ -415,7 +415,7 @@ class ZhipuClient:
                 "corrected_answer": answers[0].get('body', '') if answers else "",
                 "correction_notes": f"JSON parsing failed, using first answer: {str(e)[:50]}",
                 "worth_formalizing": True,
-                "formalization_value": "medium"
+                "formalization_value": None
             }
 
     def correct_question_only(
@@ -481,7 +481,7 @@ class ZhipuClient:
                 "corrected_question": question,
                 "correction_notes": f"JSON parsing failed, assuming valid: {str(e)[:50]}",
                 "worth_formalizing": True,
-                "formalization_value": "medium"
+                "formalization_value": None
             }
 
 

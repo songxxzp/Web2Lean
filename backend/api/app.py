@@ -8,6 +8,7 @@ from pathlib import Path
 
 from ..config import get_settings
 from ..database import DatabaseManager
+from ..version import BACKEND_VERSION
 from .routes import (
     crawlers_bp, statistics_bp, processing_bp,
     database_bp, config_bp, verification_bp
@@ -56,7 +57,7 @@ def create_app(config_path: str = None) -> Flask:
     def index():
         return jsonify({
             'name': 'Web2Lean API',
-            'version': '1.0.1',
+            'version': BACKEND_VERSION,
             'status': 'running'
         })
 

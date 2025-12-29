@@ -8,11 +8,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ..database import DatabaseManager
 from ..utils import ZhipuClient
+from ..version import BACKEND_VERSION
 
 logger = logging.getLogger(__name__)
-
-# Backend version for tracking preprocessing changes
-BACKEND_VERSION = "1.0.1"
 
 
 class LLMProcessor:
@@ -212,7 +210,8 @@ class LLMProcessor:
                 'status': 'preprocessed',
                 'preprocessed_body': result.get('corrected_question', question_text),
                 'theorem_name': result.get('theorem_name'),
-                'correction_notes': result.get('correction_notes', '')
+                'correction_notes': result.get('correction_notes', ''),
+                'formalization_value': result.get('formalization_value', None)
             }
 
         except Exception as e:
@@ -258,7 +257,8 @@ class LLMProcessor:
                     'preprocessed_body': result.get('corrected_question', question_text),
                     'preprocessed_answer': result.get('corrected_answer', answer_text),
                     'theorem_name': result.get('theorem_name'),
-                    'correction_notes': result.get('correction_notes', '')
+                    'correction_notes': result.get('correction_notes', ''),
+                    'formalization_value': result.get('formalization_value', None)
                 }
             else:
                 # Answer is not valid, process question only
@@ -266,7 +266,8 @@ class LLMProcessor:
                     'status': 'preprocessed',
                     'preprocessed_body': result.get('corrected_question', question_text),
                     'theorem_name': result.get('theorem_name'),
-                    'correction_notes': result.get('correction_notes', '') + " [Answer excluded: not valid]"
+                    'correction_notes': result.get('correction_notes', '') + " [Answer excluded: not valid]",
+                    'formalization_value': result.get('formalization_value', None)
                 }
 
         except Exception as e:
@@ -307,7 +308,8 @@ class LLMProcessor:
                     'preprocessed_body': result.get('corrected_question', question_text),
                     'preprocessed_answer': None,
                     'theorem_name': result.get('theorem_name'),
-                    'correction_notes': result.get('correction_notes', '') + " [No valid answer found]"
+                    'correction_notes': result.get('correction_notes', '') + " [No valid answer found]",
+                    'formalization_value': result.get('formalization_value', None)
                 }
 
             # Use LLM-corrected question and answer directly
@@ -316,7 +318,8 @@ class LLMProcessor:
                 'preprocessed_body': result.get('corrected_question', question_text),
                 'preprocessed_answer': result.get('corrected_answer'),
                 'theorem_name': result.get('theorem_name'),
-                'correction_notes': result.get('correction_notes', '')
+                'correction_notes': result.get('correction_notes', ''),
+                'formalization_value': result.get('formalization_value', None)
             }
 
         except Exception as e:
