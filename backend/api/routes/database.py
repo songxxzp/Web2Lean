@@ -2,6 +2,7 @@
 Database viewing API endpoints.
 """
 from flask import Blueprint, request, jsonify, current_app
+from sqlalchemy import func
 
 database_bp = Blueprint('database', __name__)
 
@@ -14,6 +15,7 @@ def clear_data():
 
     data = request.get_json() or {}
     stage = data.get('stage')  # 'lean', 'verification', 'preprocess', 'failed', 'raw', or 'all'
+    versions = data.get('versions', [])  # For preprocess: list of versions to clear, or ['all'] for all
 
     db = current_app.config['db']
     session = db.get_session()
@@ -56,29 +58,69 @@ def clear_data():
             return jsonify({'message': f'Cleared verification status from {count} questions'})
 
         elif stage == 'preprocess':
-            # Clear preprocessed data, lean code, verification status, and failed/cant_convert status
-            ps_query = session.query(ProcessingStatus).filter(
-                ProcessingStatus.status.in_(['preprocessed', 'lean_converted', 'failed', 'cant_convert'])
-            )
-            count = ps_query.count()
-            ps_query.update({
-                ProcessingStatus.status: 'raw',
-                ProcessingStatus.preprocessed_body: None,
-                ProcessingStatus.preprocessed_answer: None,
-                ProcessingStatus.correction_notes: None,
-                ProcessingStatus.lean_code: None,
-                ProcessingStatus.lean_error: None,
-                ProcessingStatus.current_stage: None,
-                ProcessingStatus.verification_status: None,
-                ProcessingStatus.verification_has_errors: None,
-                ProcessingStatus.verification_has_warnings: None,
-                ProcessingStatus.verification_messages: None,
-                ProcessingStatus.verification_error: None,
-                ProcessingStatus.verification_time: None,
-                ProcessingStatus.verification_completed_at: None
-            }, synchronize_session=False)
-            session.commit()
-            return jsonify({'message': f'Cleared preprocessed data from {count} questions'})
+            # Clear preprocessed data by version(s)
+            if not versions or len(versions) == 0:
+                return jsonify({'error': 'No versions specified'}), 400
+
+            # Build query
+            if 'all' in versions:
+                # Clear all preprocessed data
+                ps_query = session.query(ProcessingStatus).filter(
+                    ProcessingStatus.status.in_(['preprocessed', 'lean_converted', 'failed', 'cant_convert'])
+                )
+                count = ps_query.count()
+                ps_query.update({
+                    ProcessingStatus.status: 'raw',
+                    ProcessingStatus.preprocessed_body: None,
+                    ProcessingStatus.preprocessed_answer: None,
+                    ProcessingStatus.correction_notes: None,
+                    ProcessingStatus.theorem_name: None,
+                    ProcessingStatus.formalization_value: None,
+                    ProcessingStatus.preprocessing_version: None,
+                    ProcessingStatus.lean_code: None,
+                    ProcessingStatus.lean_error: None,
+                    ProcessingStatus.current_stage: None,
+                    ProcessingStatus.verification_status: None,
+                    ProcessingStatus.verification_has_errors: None,
+                    ProcessingStatus.verification_has_warnings: None,
+                    ProcessingStatus.verification_messages: None,
+                    ProcessingStatus.verification_error: None,
+                    ProcessingStatus.verification_time: None,
+                    ProcessingStatus.verification_completed_at: None,
+                    ProcessingStatus.processing_started_at: None,
+                    ProcessingStatus.processing_completed_at: None
+                }, synchronize_session=False)
+                session.commit()
+                return jsonify({'message': f'Cleared preprocessed data from {count} questions'})
+            else:
+                # Clear specific versions
+                ps_query = session.query(ProcessingStatus).filter(
+                    ProcessingStatus.preprocessing_version.in_(versions)
+                )
+                count = ps_query.count()
+                ps_query.update({
+                    ProcessingStatus.status: 'raw',
+                    ProcessingStatus.preprocessed_body: None,
+                    ProcessingStatus.preprocessed_answer: None,
+                    ProcessingStatus.correction_notes: None,
+                    ProcessingStatus.theorem_name: None,
+                    ProcessingStatus.formalization_value: None,
+                    ProcessingStatus.preprocessing_version: None,
+                    ProcessingStatus.lean_code: None,
+                    ProcessingStatus.lean_error: None,
+                    ProcessingStatus.current_stage: None,
+                    ProcessingStatus.verification_status: None,
+                    ProcessingStatus.verification_has_errors: None,
+                    ProcessingStatus.verification_has_warnings: None,
+                    ProcessingStatus.verification_messages: None,
+                    ProcessingStatus.verification_error: None,
+                    ProcessingStatus.verification_time: None,
+                    ProcessingStatus.verification_completed_at: None,
+                    ProcessingStatus.processing_started_at: None,
+                    ProcessingStatus.processing_completed_at: None
+                }, synchronize_session=False)
+                session.commit()
+                return jsonify({'message': f'Cleared preprocessed data from {count} questions (versions: {", ".join(versions)})'})
 
         elif stage == 'failed':
             # Reset all failed questions to raw status
@@ -482,6 +524,44 @@ def clear_lean_conversions():
 
     except Exception as e:
         session.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@database_bp.route('/preprocessing-versions', methods=['GET', 'OPTIONS'])
+def get_preprocessing_versions():
+    """Get list of all available preprocessing versions."""
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    db = current_app.config['db']
+    session = db.get_session()
+
+    try:
+        from backend.database.schema import ProcessingStatus
+
+        # Get all distinct preprocessing versions with their counts
+        results = session.query(
+            ProcessingStatus.preprocessing_version,
+            func.count(ProcessingStatus.id).label('count')
+        ).filter(
+            ProcessingStatus.preprocessing_version.isnot(None)
+        ).group_by(
+            ProcessingStatus.preprocessing_version
+        ).all()
+
+        versions = [
+            {'version': r.preprocessing_version, 'count': r.count}
+            for r in results
+        ]
+
+        # Sort by version (newest first)
+        versions.sort(key=lambda x: x['version'], reverse=True)
+
+        return jsonify({'versions': versions})
+
+    except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
         session.close()

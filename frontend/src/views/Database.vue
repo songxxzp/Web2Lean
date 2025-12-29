@@ -429,6 +429,59 @@
         </span>
       </template>
     </el-dialog>
+
+    <!-- Preprocessing Version Selection Dialog for Clearing Preprocessed Data -->
+    <el-dialog
+      v-model="versionDialogVisible"
+      title="Clear Preprocessed Data by Version"
+      width="600px"
+    >
+      <el-alert type="warning" :closable="false" style="margin-bottom: 1rem;">
+        Select which preprocessing version(s) to clear. This will remove all preprocessed data from the selected version(s) and revert questions to "raw" status.
+      </el-alert>
+
+      <div style="margin-bottom: 1rem;">
+        <el-checkbox
+          :model-value="selectedVersionsToClear.includes('all')"
+          :indeterminate="selectedVersionsToClear.length > 0 && !selectedVersionsToClear.includes('all')"
+          @change="handleSelectAllVersions"
+        >
+          <strong>All Versions</strong>
+        </el-checkbox>
+      </div>
+
+      <el-divider style="margin: 1rem 0;" />
+
+      <div v-if="availableVersions.length > 0">
+        <el-checkbox-group v-model="selectedVersionsToClear">
+          <div v-for="version in availableVersions" :key="version.version" style="margin-bottom: 0.5rem;">
+            <el-checkbox :label="version.version" :disabled="selectedVersionsToClear.includes('all')">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <strong>{{ version.version }}</strong>
+                <span style="color: #666; font-size: 0.9em;">({{ version.count }} questions)</span>
+              </div>
+            </el-checkbox>
+          </div>
+        </el-checkbox-group>
+      </div>
+      <div v-else style="text-align: center; color: #999; padding: 2rem;">
+        No versions available
+      </div>
+
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="versionDialogVisible = false">Cancel</el-button>
+          <el-button
+            type="danger"
+            @click="clearSelectedVersions"
+            :loading="clearingVersions"
+            :disabled="selectedVersionsToClear.length === 0"
+          >
+            Clear Selected
+          </el-button>
+        </span>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -474,6 +527,12 @@ const converterDialogVisible = ref(false)
 const availableConverters = ref([])
 const selectedConvertersToClear = ref([])
 const clearingConverters = ref(false)
+
+// Preprocessing version selection dialog for clearing
+const versionDialogVisible = ref(false)
+const availableVersions = ref([])
+const selectedVersionsToClear = ref([])
+const clearingVersions = ref(false)
 
 // Sort answers: accepted first, then by score
 const sortedAnswers = computed(() => {
@@ -677,6 +736,70 @@ async function clearSelectedConverters() {
   }
 }
 
+// Show preprocessing version selection dialog
+async function showVersionClearDialog() {
+  try {
+    const response = await fetch('http://localhost:5000/api/database/preprocessing-versions')
+    const data = await response.json()
+
+    if (response.ok) {
+      availableVersions.value = data.versions || []
+      if (availableVersions.value.length === 0) {
+        ElMessage.warning('No preprocessed data found to clear')
+        return
+      }
+      // Default: select all versions
+      selectedVersionsToClear.value = ['all']
+      versionDialogVisible.value = true
+    } else {
+      ElMessage.error(data.error || 'Failed to load versions')
+    }
+  } catch (error) {
+    console.error('Error loading versions:', error)
+    ElMessage.error('Failed to load versions: ' + (error.message || 'Unknown error'))
+  }
+}
+
+// Handle select all versions checkbox
+function handleSelectAllVersions(checked) {
+  if (checked) {
+    selectedVersionsToClear.value = ['all']
+  } else {
+    selectedVersionsToClear.value = []
+  }
+}
+
+// Clear selected versions
+async function clearSelectedVersions() {
+  if (selectedVersionsToClear.value.length === 0) {
+    ElMessage.warning('Please select at least one version')
+    return
+  }
+
+  try {
+    clearingVersions.value = true
+    const response = await fetch('http://localhost:5000/api/database/clear', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stage: 'preprocess', versions: selectedVersionsToClear.value })
+    })
+    const data = await response.json()
+
+    if (response.ok) {
+      ElMessage.success(data.message)
+      versionDialogVisible.value = false
+      await loadQuestions()
+    } else {
+      ElMessage.error(data.error || 'Failed to clear versions')
+    }
+  } catch (error) {
+    ElMessage.error('Failed to clear versions')
+    console.error(error)
+  } finally {
+    clearingVersions.value = false
+  }
+}
+
 async function clearAll(stage) {
   // For Lean clearing, show converter selection dialog
   if (stage === 'lean') {
@@ -684,16 +807,20 @@ async function clearAll(stage) {
     return
   }
 
+  // For Preprocess clearing, show version selection dialog
+  if (stage === 'preprocess') {
+    await showVersionClearDialog()
+    return
+  }
+
   const titles = {
     verification: 'Clear All Verification Status',
-    preprocess: 'Clear All Preprocessed Data',
     failed: 'Clear All Failed Questions',
     raw: 'Delete All Data'
   }
 
   const warnings = {
     verification: 'This will remove all verification status but keep Lean code. You can re-verify questions.',
-    preprocess: 'This will remove all preprocessed data and Lean code. Questions will revert to "raw" status.',
     failed: 'This will reset all failed questions to "raw" status, clearing all error data. You can retry processing them.',
     raw: 'This will DELETE ALL QUESTIONS from the database. This action cannot be undone!'
   }
