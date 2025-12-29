@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ..database import DatabaseManager
 from ..utils import ZhipuClient
-from ..version import BACKEND_VERSION
+from ..version import PREPROCESSING_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +138,7 @@ class LLMProcessor:
                 theorem_name=theorem_name,
                 correction_notes=result.get('correction_notes'),
                 formalization_value=result.get('formalization_value'),
-                preprocessing_version=BACKEND_VERSION,
+                preprocessing_version=PREPROCESSING_VERSION,
                 processing_completed_at=self._now()
             )
 

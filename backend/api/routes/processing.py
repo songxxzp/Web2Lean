@@ -170,45 +170,54 @@ def start_preprocessing():
             # Process questions in batches with concurrency
             batch_size = concurrency * 2  # Process in batches to avoid overwhelming the system
 
-            for batch_start in range(0, len(questions), batch_size):
-                # Check if task is paused
-                task.wait_if_paused()
+            try:
+                for batch_start in range(0, len(questions), batch_size):
+                    # Check if task is paused
+                    task.wait_if_paused()
 
-                # Check if task is stopped
-                if task.is_stopped():
-                    break
+                    # Check if task is stopped
+                    if task.is_stopped():
+                        break
 
-                batch = questions[batch_start:batch_start + batch_size]
+                    batch = questions[batch_start:batch_start + batch_size]
 
-                # Filter by site_id if specified
-                if site_id:
-                    batch = [q for q in batch if q['site_id'] == site_id]
+                    # Filter by site_id if specified
+                    if site_id:
+                        batch = [q for q in batch if q['site_id'] == site_id]
 
-                if not batch:
-                    continue
+                    if not batch:
+                        continue
 
-                # Extract question IDs
-                question_ids = [q['id'] for q in batch]
+                    # Extract question IDs
+                    question_ids = [q['id'] for q in batch]
 
-                # Process batch concurrently
-                results = processor.process_questions_batch(
-                    question_ids,
-                    concurrency=concurrency
-                )
+                    # Process batch concurrently
+                    results = processor.process_questions_batch(
+                        question_ids,
+                        concurrency=concurrency
+                    )
 
-                # Update task progress
-                for result in results:
-                    success = result.get('success', False)
-                    task.increment_progress(success=success)
+                    # Update task progress
+                    for result in results:
+                        success = result.get('success', False)
+                        task.increment_progress(success=success)
 
-                # Add delay between batches to avoid rate limiting
-                if batch_start + batch_size < len(questions):
-                    time.sleep(3)  # Wait 3 seconds between batches
+                    # Add delay between batches to avoid rate limiting
+                    if batch_start + batch_size < len(questions):
+                        time.sleep(3)  # Wait 3 seconds between batches
 
-            # Mark task as completed
-            task.status = 'completed'
-            task.completed_at = task.completed_at or __import__('datetime').datetime.now()
-            task.current_question_id = None
+                # Mark task as completed
+                task.status = 'completed'
+                task.completed_at = task.completed_at or __import__('datetime').datetime.now()
+                task.current_question_id = None
+
+            finally:
+                # Always clean up any stuck preprocessing status when task ends
+                try:
+                    db.cleanup_stuck_preprocessing()
+                except Exception as e:
+                    logging = __import__('logging').getLogger(__name__)
+                    logging.error(f'Error cleaning up stuck preprocessing after task completion: {e}')
 
         thread = threading.Thread(target=process_questions, daemon=True)
         thread.start()
@@ -286,6 +295,17 @@ def stop_task(task_id: str):
     task_manager = TaskManager()
 
     if task_manager.stop_task(task_id):
+        # Clean up any questions stuck in preprocessing status
+        db = current_app.config['db']
+        try:
+            count = db.cleanup_stuck_preprocessing()
+            if count > 0:
+                return jsonify({'message': f'Task stopped and cleaned up {count} stuck questions'})
+        except Exception as e:
+            # Log error but don't fail the stop operation
+            logging = __import__('logging').getLogger(__name__)
+            logging.error(f'Error cleaning up stuck preprocessing after stopping task: {e}')
+
         return jsonify({'message': 'Task stopped'})
 
     return jsonify({'error': 'Task not found'}), 404

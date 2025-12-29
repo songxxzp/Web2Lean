@@ -44,6 +44,9 @@ def create_app(config_path: str = None) -> Flask:
     # Setup logging
     setup_logging(app)
 
+    # Clean up any stuck preprocessing status from previous runs
+    cleanup_stuck_preprocessing(app)
+
     # Register blueprints
     app.register_blueprint(crawlers_bp, url_prefix='/api/crawlers')
     app.register_blueprint(statistics_bp, url_prefix='/api/statistics')
@@ -92,3 +95,18 @@ def setup_logging(app: Flask):
             logging.StreamHandler()
         ]
     )
+
+
+def cleanup_stuck_preprocessing(app: Flask):
+    """
+    Clean up questions stuck in 'preprocessing' status on backend startup.
+
+    This handles cases where the backend was shut down while preprocessing was in progress.
+    """
+    try:
+        db = app.config['db']
+        count = db.cleanup_stuck_preprocessing()
+        if count > 0:
+            logging.info(f'Cleaned up {count} questions stuck in preprocessing status on startup')
+    except Exception as e:
+        logging.error(f'Error cleaning up stuck preprocessing on startup: {e}')

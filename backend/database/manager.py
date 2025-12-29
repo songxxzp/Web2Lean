@@ -648,6 +648,48 @@ class DatabaseManager:
         finally:
             session.close()
 
+    def cleanup_stuck_preprocessing(self) -> int:
+        """
+        Clean up questions stuck in 'preprocessing' status.
+
+        Resets questions with status='preprocessing' back to 'raw' status.
+        This should be called on backend startup and when preprocessing tasks are stopped.
+
+        Returns:
+            Number of questions reset
+        """
+        session = self.get_session()
+        try:
+            # Find all questions stuck in preprocessing status
+            stuck_questions = session.query(ProcessingStatus).filter(
+                ProcessingStatus.status == 'preprocessing'
+            ).all()
+
+            count = len(stuck_questions)
+            if count > 0:
+                # Reset them to raw status
+                for ps in stuck_questions:
+                    ps.status = 'raw'
+                    ps.current_stage = None
+                    ps.processing_started_at = None
+                    # Clear any partial preprocessing data
+                    if not ps.preprocessed_body:
+                        # Only clear if there's no preprocessed data yet
+                        ps.preprocessing_error = 'Preprocessing was interrupted'
+
+                session.commit()
+                logger = __import__('logging').getLogger(__name__)
+                logger.info(f'Cleaned up {count} questions stuck in preprocessing status')
+
+            return count
+        except Exception as e:
+            session.rollback()
+            logger = __import__('logging').getLogger(__name__)
+            logger.error(f'Error cleaning up stuck preprocessing: {e}')
+            raise
+        finally:
+            session.close()
+
     def get_questions_by_status(self, status: str, limit: int = 100) -> List[Dict[str, Any]]:
         """Get questions by processing status."""
         session = self.get_session()
