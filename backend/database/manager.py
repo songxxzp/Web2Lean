@@ -808,8 +808,18 @@ class DatabaseManager:
     def save_lean_conversion_result(self, question_id: int, converter_name: str,
                                    converter_type: str, question_lean_code: str = None,
                                    answer_lean_code: str = None, conversion_time: float = None,
-                                   error_message: str = None) -> LeanConversionResult:
+                                   error_message: str = None, converter_version: str = None) -> LeanConversionResult:
         """Save or update a Lean conversion result from a specific converter."""
+        # Auto-detect converter version if not provided
+        if converter_version is None:
+            from ..version import GLM_AGENT_VERSION, KIMINA_VERSION
+            if converter_name.startswith('glm') or converter_name.startswith('api_llm'):
+                converter_version = GLM_AGENT_VERSION
+            elif converter_name.startswith('kimina') or converter_name.startswith('local_model'):
+                converter_version = KIMINA_VERSION
+            else:
+                converter_version = "unknown"
+
         session = self.get_session()
         try:
             # Check if result already exists for this converter
@@ -828,12 +838,15 @@ class DatabaseManager:
                     result.conversion_time = conversion_time
                 if error_message is not None:
                     result.error_message = error_message
+                # Always update version when updating
+                result.converter_version = converter_version
             else:
                 # Create new result
                 result = LeanConversionResult(
                     question_id=question_id,
                     converter_name=converter_name,
                     converter_type=converter_type,
+                    converter_version=converter_version,
                     question_lean_code=question_lean_code,
                     answer_lean_code=answer_lean_code,
                     conversion_time=conversion_time,
@@ -860,6 +873,7 @@ class DatabaseManager:
                     'id': r.id,
                     'converter_name': r.converter_name,
                     'converter_type': r.converter_type,
+                    'converter_version': r.converter_version,
                     'question_lean_code': r.question_lean_code,
                     'answer_lean_code': r.answer_lean_code,
                     'verification_status': r.verification_status,
@@ -902,29 +916,48 @@ class DatabaseManager:
             session.close()
 
     def get_available_converters(self) -> List[Dict[str, Any]]:
-        """Get list of all available converters with counts."""
+        """Get list of all available converters with counts and versions."""
         session = self.get_session()
         try:
             from sqlalchemy import distinct
 
-            # Get unique converter names and types
+            # Get unique converter names, types, versions and counts
             converters = session.query(
                 LeanConversionResult.converter_name,
                 LeanConversionResult.converter_type,
+                LeanConversionResult.converter_version,
                 func.count(LeanConversionResult.id).label('count')
             ).group_by(
                 LeanConversionResult.converter_name,
-                LeanConversionResult.converter_type
+                LeanConversionResult.converter_type,
+                LeanConversionResult.converter_version
             ).all()
 
-            result = [
-                {
+            # Group by converter_name and combine versions
+            from collections import defaultdict
+            converter_data = defaultdict(lambda: {
+                'converter_type': None,
+                'versions': [],
+                'total_count': 0
+            })
+
+            for name, conv_type, version, count in converters:
+                converter_data[name]['converter_type'] = conv_type
+                converter_data[name]['versions'].append(version)
+                converter_data[name]['total_count'] += count
+
+            result = []
+            for name, data in converter_data.items():
+                # Use the most recent version (assuming versions are sortable)
+                versions = sorted([v for v in data['versions'] if v], reverse=True)
+                display_version = versions[0] if versions else None
+
+                result.append({
                     'converter_name': name,
-                    'converter_type': conv_type,
-                    'count': count
-                }
-                for name, conv_type, count in converters
-            ]
+                    'converter_type': data['converter_type'],
+                    'converter_version': display_version,
+                    'count': data['total_count']
+                })
 
             # Check for legacy lean data in processing_status
             legacy_count = session.query(ProcessingStatus).filter(
@@ -937,6 +970,7 @@ class DatabaseManager:
                 result.append({
                     'converter_name': 'legacy',
                     'converter_type': 'legacy',
+                    'converter_version': None,
                     'count': legacy_count
                 })
 

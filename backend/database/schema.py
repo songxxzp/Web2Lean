@@ -214,6 +214,7 @@ class LeanConversionResult(Base):
     question_id = Column(Integer, ForeignKey('questions.id'), nullable=False)
     converter_name = Column(String(100), nullable=False, index=True)  # e.g., 'kimina-7b', 'glm-4'
     converter_type = Column(String(50), nullable=False)  # 'local_model', 'api_llm', 'manual'
+    converter_version = Column(String(50))  # Version of the converter (e.g., GLM_AGENT_VERSION, KIMINA_VERSION)
     question_lean_code = Column(Text)  # Lean code for question (theorem/definition)
     answer_lean_code = Column(Text)  # Lean code for answer (proof)
     verification_status = Column(Text)  # 'not_verified', 'verifying', 'passed', 'warning', 'failed', 'error'

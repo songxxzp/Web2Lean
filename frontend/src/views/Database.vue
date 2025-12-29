@@ -286,6 +286,7 @@
                   >
                     <span>{{ conv.converter_name }}</span>
                     <el-tag size="small" style="margin-left: 8px;">{{ conv.converter_type }}</el-tag>
+                    <el-tag v-if="conv.converter_version" size="small" type="success" style="margin-left: 4px;">v{{ conv.converter_version }}</el-tag>
                   </el-option>
                 </el-select>
                 <el-tag v-if="getCurrentConversion()" :type="getVerificationStatusType(getCurrentConversion().verification_status)">
@@ -405,6 +406,7 @@
               <div style="display: flex; align-items: center; gap: 8px;">
                 <strong>{{ converter.converter_name }}</strong>
                 <el-tag size="small" type="info">{{ converter.converter_type }}</el-tag>
+                <el-tag v-if="converter.converter_version" size="small" type="success">v{{ converter.converter_version }}</el-tag>
                 <span style="color: #666; font-size: 0.9em;">({{ converter.count }} results)</span>
               </div>
             </el-checkbox>
