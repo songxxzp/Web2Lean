@@ -4,7 +4,7 @@
 
     <el-card class="actions-card">
       <el-row :gutter="20">
-        <el-col :span="12">
+        <el-col :span="8">
           <h3>Preprocessing (GLM-4.7)</h3>
           <p>Process raw questions through LLM validation and correction</p>
 
@@ -69,7 +69,7 @@
                 @click="startPreprocessing"
                 :loading="processing"
               >
-                Start Preprocessing
+                Start
               </el-button>
             </el-space>
             <div style="color: #909399; font-size: 12px;">
@@ -78,7 +78,7 @@
           </el-space>
         </el-col>
 
-        <el-col :span="12">
+        <el-col :span="8">
           <h3>Lean Conversion (Kimina)</h3>
           <p>Convert preprocessed questions to Lean 4</p>
 
@@ -138,16 +138,94 @@
                 placeholder="0 for all"
                 style="width: 150px"
               />
+              <el-select v-model="leanConverter" style="width: 200px" placeholder="Select Converter">
+                <el-option label="Kimina (Legacy)" value="kimina" />
+                <el-option label="GLM LLM Agent" value="llm" />
+              </el-select>
               <el-button
                 type="success"
                 @click="startLeanConversion"
                 :loading="processing"
               >
-                Start Lean Conversion
+                Start
               </el-button>
             </el-space>
             <div style="color: #909399; font-size: 12px;">
               Set to 0 to process all preprocessed questions
+            </div>
+          </el-space>
+        </el-col>
+
+        <el-col :span="8">
+          <h3>Lean Verification (Kimina)</h3>
+          <p>Verify Lean code against kimina-lean-server</p>
+
+          <!-- Processing Controls -->
+          <el-space v-if="verificationTask" direction="vertical" style="width: 100%">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <el-progress
+                :percentage="verificationTask.progress_percent"
+                :status="verificationTask.status === 'completed' ? 'success' : undefined"
+                style="flex: 1"
+              >
+                <template #default="{ percentage }">
+                  <span>{{ percentage }}% ({{ verificationTask.processed }}/{{ verificationTask.total }})</span>
+                </template>
+              </el-progress>
+            </div>
+
+            <el-space>
+              <el-button
+                v-if="verificationTask.status === 'running'"
+                type="warning"
+                @click="pauseVerification"
+                :loading="pauseLoading"
+              >
+                Pause
+              </el-button>
+              <el-button
+                v-if="verificationTask.status === 'paused'"
+                type="success"
+                @click="resumeVerification"
+                :loading="resumeLoading"
+              >
+                Resume
+              </el-button>
+              <el-button
+                v-if="['running', 'paused'].includes(verificationTask.status)"
+                type="danger"
+                @click="stopVerification"
+                :loading="stopLoading"
+              >
+                Stop
+              </el-button>
+            </el-space>
+
+            <div v-if="verificationTask.status !== 'completed'" style="color: #909399; font-size: 12px;">
+              Status: {{ verificationTask.status }} | Passed: {{ verificationTask.passed }} | Failed: {{ verificationTask.failed }}
+            </div>
+          </el-space>
+
+          <!-- Start Controls (only shown when no active task) -->
+          <el-space v-else direction="vertical" style="width: 100%">
+            <el-space>
+              <el-input-number
+                v-model="verificationLimit"
+                :min="0"
+                :max="1000"
+                placeholder="0 for all"
+                style="width: 150px"
+              />
+              <el-button
+                type="info"
+                @click="startVerification"
+                :loading="processing"
+              >
+                Start
+              </el-button>
+            </el-space>
+            <div style="color: #909399; font-size: 12px;">
+              Set to 0 to verify all converted questions
             </div>
           </el-space>
         </el-col>
@@ -181,7 +259,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { statisticsApi, processingApi } from '@/api'
+import { statisticsApi, processingApi, verificationApi } from '@/api'
 
 const processing = ref(false)
 const pauseLoading = ref(false)
@@ -191,9 +269,12 @@ const queueStats = ref([])
 const totalQuestions = ref(0)
 const preprocessLimit = ref(10)
 const leanLimit = ref(10)
+const leanConverter = ref('kimina')  // 'kimina' or 'llm'
+const verificationLimit = ref(10)
 
 const preprocessTask = ref(null)
 const leanTask = ref(null)
+const verificationTask = ref(null)
 
 let progressInterval = null
 
@@ -206,6 +287,7 @@ async function loadStats() {
       { status: 'Raw', count: ps.raw || 0 },
       { status: 'Preprocessed', count: ps.preprocessed || 0 },
       { status: 'Lean Converted', count: ps.lean_converted || 0 },
+      { status: 'Lean Verified', count: ps.lean_verified || 0 },
       { status: 'Failed', count: ps.failed || 0 }
     ]
   } catch (error) {
@@ -222,11 +304,28 @@ async function loadProgress() {
       preprocessTask.value = null
     }
 
-    const leanResp = await processingApi.getProgress('lean_conversion')
-    if (leanResp.active) {
-      leanTask.value = leanResp.progress
+    // Check for either kimina or llm lean conversion tasks
+    const kiminaResp = await processingApi.getProgress('lean_conversion_kimina')
+    const llmResp = await processingApi.getProgress('lean_conversion_llm')
+
+    // Show progress for whichever is active (prioritize based on selected converter)
+    if (leanConverter.value === 'kimina' && kiminaResp.active) {
+      leanTask.value = kiminaResp.progress
+    } else if (leanConverter.value === 'llm' && llmResp.active) {
+      leanTask.value = llmResp.progress
+    } else if (kiminaResp.active) {
+      leanTask.value = kiminaResp.progress
+    } else if (llmResp.active) {
+      leanTask.value = llmResp.progress
     } else {
       leanTask.value = null
+    }
+
+    const verifyResp = await processingApi.getProgress('verification')
+    if (verifyResp.active) {
+      verificationTask.value = verifyResp.progress
+    } else {
+      verificationTask.value = null
     }
   } catch (error) {
     console.error('Failed to load progress:', error)
@@ -269,7 +368,7 @@ async function startLeanConversion() {
   processing.value = true
   try {
     const limit = leanLimit.value === 0 ? 10000 : leanLimit.value
-    const result = await processingApi.startLean({ limit })
+    const result = await processingApi.startLean({ limit, converter: leanConverter.value })
     ElMessage.success(result.message)
 
     if (result.task_id) {
@@ -365,6 +464,72 @@ async function stopLean() {
   }
 }
 
+async function startVerification() {
+  processing.value = true
+  try {
+    // Use verification API to start batch verification
+    const limit = verificationLimit.value === 0 ? 10000 : verificationLimit.value
+
+    // Start verification as a background task
+    const result = await verificationApi.verifyAll({ limit, async: true })
+
+    if (result.task_id) {
+      verificationTask.value = result.progress
+      ElMessage.success('Lean verification started')
+      startProgressPolling()
+    } else {
+      // Synchronous completion
+      const totalTime = result.results?.reduce((sum, r) => sum + (r.total_time || 0), 0) || 0
+      ElMessage.success(`Verification completed: ${result.passed} passed, ${result.failed} failed, ${result.total_time || totalTime.toFixed(2)}s`)
+      await loadStats()
+    }
+  } catch (error) {
+    ElMessage.error(error.message || 'Failed to start verification')
+  } finally {
+    processing.value = false
+  }
+}
+
+async function pauseVerification() {
+  pauseLoading.value = true
+  try {
+    await processingApi.pauseTask(verificationTask.value.task_id)
+    ElMessage.success('Verification paused')
+    await loadProgress()
+  } catch (error) {
+    ElMessage.error(error.message || 'Failed to pause verification')
+  } finally {
+    pauseLoading.value = false
+  }
+}
+
+async function resumeVerification() {
+  resumeLoading.value = true
+  try {
+    await processingApi.resumeTask(verificationTask.value.task_id)
+    ElMessage.success('Verification resumed')
+    await loadProgress()
+  } catch (error) {
+    ElMessage.error(error.message || 'Failed to resume verification')
+  } finally {
+    resumeLoading.value = false
+  }
+}
+
+async function stopVerification() {
+  stopLoading.value = true
+  try {
+    await processingApi.stopTask(verificationTask.value.task_id)
+    ElMessage.success('Verification stopped')
+    await loadProgress()
+    await loadStats()
+  } catch (error) {
+    ElMessage.error(error.message || 'Failed to stop verification')
+  } finally {
+    stopLoading.value = false
+  }
+}
+
 function startProgressPolling() {
   if (progressInterval) return
 
@@ -373,7 +538,7 @@ function startProgressPolling() {
     await loadStats()
 
     // Stop polling if no active tasks
-    if (!preprocessTask.value && !leanTask.value) {
+    if (!preprocessTask.value && !leanTask.value && !verificationTask.value) {
       stopProgressPolling()
     }
   }, 2000) // Poll every 2 seconds
@@ -391,7 +556,7 @@ onMounted(async () => {
   await loadProgress()
 
   // Start polling if there are active tasks
-  if (preprocessTask.value || leanTask.value) {
+  if (preprocessTask.value || leanTask.value || verificationTask.value) {
     startProgressPolling()
   }
 })

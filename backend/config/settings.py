@@ -21,11 +21,12 @@ class Settings:
     zhipu_api_key: str = ''
     vllm_base_url: str = 'http://localhost:8000/v1'
     vllm_model_path: str = '/root/Kimina-Autoformalizer-7B'
+    kimina_url: str = 'http://127.0.0.1:9000'  # Lean verification server
 
     # LLM Models
     glm_text_model: str = 'glm-4.7'  # For text processing (new zai-sdk)
     glm_vision_model: str = 'glm-4.6v'  # For image OCR (new zai-sdk)
-    glm_lean_model: str = ''  # Empty means use local Kimina by default
+    glm_lean_model: str = 'glm-4.7'  # For Lean code conversion (GLM-based LLM agent)
 
     # Crawler defaults
     default_pages_per_run: int = 10
@@ -34,10 +35,13 @@ class Settings:
     default_timeout: int = 30
 
     # Processing
-    lean_conversion_max_tokens: int = 2048
-    lean_conversion_temperature: float = 0.6
+    lean_conversion_max_tokens: int = 16000  # Max tokens for lean conversion
+    lean_conversion_temperature: float = 0.2  # Temperature for lean conversion
+    lean_max_iterations: int = 1  # Max iterations for correction
     ocr_temperature: float = 0.1
     preprocessing_temperature: float = 0.2
+    preprocessing_concurrency: int = 2  # Number of concurrent LLM API calls
+    preprocessing_max_length: int = 16000  # Max token length for LLM calls
 
     # Paths
     base_dir: Path = field(default_factory=lambda: Path('/datadisk/Web2Lean'))
@@ -78,9 +82,14 @@ class Settings:
         self.api_debug = os.getenv('API_DEBUG', 'false').lower() == 'true'
         self.glm_text_model = os.getenv('GLM_TEXT_MODEL', self.glm_text_model)
         self.glm_vision_model = os.getenv('GLM_VISION_MODEL', self.glm_vision_model)
+        self.kimina_url = os.getenv('KIMINA_URL', self.kimina_url)
         # Handle "local" as empty string for Kimina model
-        lean_model = os.getenv('GLM_LEAN_MODEL', self.glm_lean_model)
-        self.glm_lean_model = '' if lean_model == 'local' else lean_model
+        lean_model_env = os.getenv('GLM_LEAN_MODEL', '')
+        if lean_model_env == 'local' or lean_model_env == '':
+            # Use default 'glm-4.7' for LLM converter
+            self.glm_lean_model = self.glm_lean_model  # Keep the default value
+        else:
+            self.glm_lean_model = lean_model_env
 
     def _load_site_configs(self):
         """Load site configurations from JSON file."""

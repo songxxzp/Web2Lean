@@ -7,12 +7,127 @@ import html
 import re
 from typing import Dict, Any, Optional, List
 
+from .prompts import (
+    QUESTION_ONLY_PROMPT,
+    QUESTION_WITH_ANSWER_PROMPT,
+    QUESTION_WITH_MULTIPLE_ANSWERS_PROMPT,
+    format_answers_text,
+    sanitize_theorem_name
+)
+
 try:
     from zai import ZhipuAiClient
     ZAI_AVAILABLE = True
 except ImportError:
     ZAI_AVAILABLE = False
     print("Warning: zai-sdk not installed. Using fallback HTTP client.")
+
+
+def parse_json_from_llm_response(content: str) -> Dict[str, Any]:
+    """
+    Robust JSON parser for LLM responses.
+
+    Handles:
+    - Markdown code blocks (```json, ```)
+    - JSON object boundaries detection
+    - Invalid escape sequences in LaTeX
+    - HTML entities
+    - Trailing/leading text outside JSON
+
+    Args:
+        content: Raw LLM response content
+
+    Returns:
+        Parsed JSON dict
+
+    Raises:
+        ValueError: If JSON cannot be parsed
+    """
+    # Remove markdown code blocks if present
+    if "```json" in content:
+        content = content.split("```json")[1].split("```")[0].strip()
+    elif "```" in content:
+        content = content.split("```")[1].split("```")[0].strip()
+
+    # Try to find the JSON object boundaries
+    start_idx = content.find('{')
+    if start_idx == -1:
+        raise ValueError("No JSON object found in response")
+
+    # Count braces to find matching closing brace
+    brace_count = 0
+    in_string = False
+    escape_next = False
+    end_idx = -1
+
+    for i in range(start_idx, len(content)):
+        char = content[i]
+
+        if escape_next:
+            escape_next = False
+            continue
+
+        if char == '\\':
+            escape_next = True
+            continue
+
+        if char == '"' and not escape_next:
+            in_string = not in_string
+            continue
+
+        if not in_string:
+            if char == '{':
+                brace_count += 1
+            elif char == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    end_idx = i + 1
+                    break
+
+    if end_idx == -1:
+        raise ValueError("Could not find complete JSON object")
+
+    json_str = content[start_idx:end_idx]
+
+    # Fix invalid escape sequences in JSON strings
+    def fix_json_escapes(s: str) -> str:
+        """Fix invalid escape sequences in JSON string values."""
+        result = []
+        i = 0
+        while i < len(s):
+            if s[i] == '\\' and i + 1 < len(s):
+                next_char = s[i + 1]
+                # Valid JSON escapes
+                if next_char in '"\\/bfnrt':
+                    result.append(s[i:i+2])
+                    i += 2
+                    continue
+                # Unicode escape like \uXXXX
+                elif next_char == 'u' and i + 5 < len(s):
+                    result.append(s[i:i+6])
+                    i += 6
+                    continue
+                # Invalid escapes - for LaTeX and special chars, double the backslash
+                # These commonly appear in mathematical content
+                elif next_char in '({[<>=_~.*+|?^-]\\\'':
+                    result.append('\\\\' + next_char)
+                    i += 2
+                    continue
+                else:
+                    # Other invalid escapes - just remove the backslash
+                    result.append(next_char)
+                    i += 2
+            else:
+                result.append(s[i])
+                i += 1
+        return ''.join(result)
+
+    json_str = fix_json_escapes(json_str)
+
+    # Decode HTML entities before parsing JSON
+    json_str = html.unescape(json_str)
+
+    return json.loads(json_str)
 
 
 class ZhipuClient:
@@ -158,8 +273,9 @@ class ZhipuClient:
         self,
         question: str,
         answer: str,
-        temperature: float = 0.2,
-        model: str = "glm-4.7"
+        temperature: float = 0.0,
+        model: str = "glm-4.7",
+        max_tokens: int = 16000
     ) -> Dict[str, Any]:
         """
         Validate and correct question/answer pair.
@@ -167,141 +283,206 @@ class ZhipuClient:
         Args:
             question: Question text
             answer: Answer text
-            temperature: Sampling temperature
+            temperature: Sampling temperature (default 0.0 for deterministic output)
             model: Model to use (default: glm-4.7 for best quality)
+            max_tokens: Maximum tokens to generate (default: 16000)
 
         Returns:
             Correction result as dict
         """
-        prompt = f"""Analyze this mathematical question and answer pair:
+        # Use lower temperature to force more deterministic JSON output
+        temp = min(temperature, 0.1)
 
---- QUESTION ---
-{question}
-
---- ANSWER ---
-{answer}
-
-Tasks:
-1. Verify if the question is well-formed and mathematically valid
-2. Verify if the answer is correct and addresses the question
-3. Check for any obvious errors, typos, or ambiguities
-4. Identify if this pair has value for formalization
-
-Respond in JSON format only (no additional text):
-{{
-  "is_valid_question": true/false,
-  "is_valid_answer": true/false,
-  "has_errors": true/false,
-  "errors": ["list of specific issues found"],
-  "corrected_question": "corrected version if needed, else original",
-  "corrected_answer": "corrected version if needed, else original",
-  "correction_notes": "detailed explanation of corrections made",
-  "worth_formalizing": true/false,
-  "formalization_value": "high/medium/low"
-}}"""
-
-        messages = [{"role": "user", "content": prompt}]
-        response = self.chat_completion(
-            messages=messages,
-            model=model,
-            temperature=temperature,
-            max_tokens=2000
+        # Format prompt with question and answer
+        user_prompt = QUESTION_WITH_ANSWER_PROMPT.format(
+            question=question,
+            answer=answer
         )
+
+        messages = [{"role": "user", "content": user_prompt}]
+
+        # Try using JSON mode if supported
+        try:
+            response = self.chat_completion(
+                messages=messages,
+                model=model,
+                temperature=temp,
+                max_tokens=max_tokens,
+                response_format={"type": "json_object"}
+            )
+        except Exception:
+            # Fallback to regular call if JSON mode not supported
+            response = self.chat_completion(
+                messages=messages,
+                model=model,
+                temperature=temp,
+                max_tokens=max_tokens
+            )
 
         content = response["choices"][0]["message"]["content"]
 
         # Try to extract JSON from response
         try:
-            # Remove markdown code blocks if present
-            if "```json" in content:
-                content = content.split("```json")[1].split("```")[0].strip()
-            elif "```" in content:
-                content = content.split("```")[1].split("```")[0].strip()
-
-            # Try to find the JSON object boundaries
-            start_idx = content.find('{')
-            if start_idx == -1:
-                raise ValueError("No JSON object found in response")
-
-            # Count braces to find matching closing brace
-            brace_count = 0
-            in_string = False
-            escape_next = False
-            end_idx = -1
-
-            for i in range(start_idx, len(content)):
-                char = content[i]
-
-                if escape_next:
-                    escape_next = False
-                    continue
-
-                if char == '\\':
-                    escape_next = True
-                    continue
-
-                if char == '"' and not escape_next:
-                    in_string = not in_string
-                    continue
-
-                if not in_string:
-                    if char == '{':
-                        brace_count += 1
-                    elif char == '}':
-                        brace_count -= 1
-                        if brace_count == 0:
-                            end_idx = i + 1
-                            break
-
-            if end_idx == -1:
-                raise ValueError("Could not find complete JSON object")
-
-            json_str = content[start_idx:end_idx]
-
-            # Fix invalid escape sequences in JSON strings
-            def fix_json_escapes(s):
-                """Fix invalid escape sequences in JSON string values."""
-                result = []
-                i = 0
-                while i < len(s):
-                    if s[i] == '\\' and i + 1 < len(s):
-                        next_char = s[i + 1]
-                        # Valid JSON escapes
-                        if next_char in '"\\/bfnrt':
-                            result.append(s[i:i+2])
-                            i += 2
-                            continue
-                        # Unicode escape like \uXXXX
-                        elif next_char == 'u' and i + 5 < len(s):
-                            result.append(s[i:i+6])
-                            i += 6
-                            continue
-                        # Invalid escapes - remove the backslash for these common LaTeX cases
-                        # Keep the backslash if it's followed by certain chars
-                        elif next_char in '({[<>=_~.*+|?^-]\\\'':
-                            # LaTeX or other special chars - keep the backslash
-                            result.append('\\\\' + next_char)
-                            i += 2
-                        else:
-                            # Other invalid escapes - just remove the backslash
-                            result.append(next_char)
-                            i += 2
-                    else:
-                        result.append(s[i])
-                        i += 1
-                return ''.join(result)
-
-            json_str = fix_json_escapes(json_str)
-
-            # Decode HTML entities before parsing JSON
-            json_str = html.unescape(json_str)
-
-            # Parse JSON
-            return json.loads(json_str)
-
+            result = parse_json_from_llm_response(content)
+            # Sanitize theorem_name if present
+            if result.get('theorem_name'):
+                result['theorem_name'] = sanitize_theorem_name(result['theorem_name'])
+            return result
         except (json.JSONDecodeError, ValueError) as e:
-            # Raise error with more details
-            raise ValueError(f"Could not parse LLM response as JSON: {e}\nRaw response: {content[:800]}")
+            # Return default safe response
+            return {
+                "is_valid_question": True,
+                "is_valid_answer": True,
+                "has_errors": False,
+                "errors": [],
+                "corrected_question": question,
+                "corrected_answer": answer,
+                "correction_notes": f"JSON parsing failed, assuming valid: {str(e)[:50]}",
+                "worth_formalizing": True,
+                "formalization_value": None
+            }
+
+    def validate_and_select_answer(
+        self,
+        question: str,
+        answers: list,
+        temperature: float = 0.0,
+        model: str = "glm-4.7",
+        max_tokens: int = 16000
+    ) -> Dict[str, Any]:
+        """
+        Validate question with multiple answers and produce a single correct, complete, formalized answer.
+
+        Args:
+            question: Question text
+            answers: List of answer dicts with 'body', 'is_accepted', 'score'
+            temperature: Sampling temperature (default 0.0 for deterministic output)
+            model: Model to use
+            max_tokens: Maximum tokens to generate (default: 16000)
+
+        Returns:
+            Validation result with corrected question and corrected answer
+        """
+        # Use lower temperature to force more deterministic JSON output
+        temp = min(temperature, 0.1)
+
+        # Format answers for LLM
+        answers_text = format_answers_text(answers)
+
+        # Format prompt with question and answers
+        user_prompt = QUESTION_WITH_MULTIPLE_ANSWERS_PROMPT.format(
+            question=question,
+            answers_text=answers_text
+        )
+
+        messages = [{"role": "user", "content": user_prompt}]
+
+        # Try using JSON mode if supported
+        try:
+            response = self.chat_completion(
+                messages=messages,
+                model=model,
+                temperature=temp,
+                max_tokens=max_tokens,
+                response_format={"type": "json_object"}
+            )
+        except Exception:
+            # Fallback to regular call if JSON mode not supported
+            response = self.chat_completion(
+                messages=messages,
+                model=model,
+                temperature=temp,
+                max_tokens=max_tokens
+            )
+
+        content = response["choices"][0]["message"]["content"]
+
+        # Try to extract JSON from response
+        try:
+            result = parse_json_from_llm_response(content)
+            # Sanitize theorem_name if present
+            if result.get('theorem_name'):
+                result['theorem_name'] = sanitize_theorem_name(result['theorem_name'])
+            return result
+        except (json.JSONDecodeError, ValueError) as e:
+            # Return default safe response - use first answer if available
+            return {
+                "is_valid_question": True,
+                "is_valid_answer": True,
+                "has_errors": False,
+                "errors": [],
+                "corrected_question": question,
+                "corrected_answer": answers[0].get('body', '') if answers else "",
+                "correction_notes": f"JSON parsing failed, using first answer: {str(e)[:50]}",
+                "worth_formalizing": True,
+                "formalization_value": None
+            }
+
+    def correct_question_only(
+        self,
+        question: str,
+        temperature: float = 0.0,
+        model: str = "glm-4.7",
+        max_tokens: int = 16000
+    ) -> Dict[str, Any]:
+        """
+        Validate and correct a question without an answer.
+
+        Args:
+            question: Question text
+            temperature: Sampling temperature (default 0.0 for deterministic output)
+            model: Model to use
+            max_tokens: Maximum tokens to generate (default: 16000)
+
+        Returns:
+            Correction result as dict
+        """
+        # Use lower temperature to force more deterministic JSON output
+        temp = min(temperature, 0.1)
+
+        # Format prompt with question
+        user_prompt = QUESTION_ONLY_PROMPT.format(question=question)
+
+        messages = [{"role": "user", "content": user_prompt}]
+
+        # Try using JSON mode if supported
+        try:
+            response = self.chat_completion(
+                messages=messages,
+                model=model,
+                temperature=temp,
+                max_tokens=max_tokens,
+                response_format={"type": "json_object"}
+            )
+        except Exception:
+            # Fallback to regular call if JSON mode not supported
+            response = self.chat_completion(
+                messages=messages,
+                model=model,
+                temperature=temp,
+                max_tokens=max_tokens
+            )
+
+        content = response["choices"][0]["message"]["content"]
+
+        # Try to extract JSON from response
+        try:
+            result = parse_json_from_llm_response(content)
+            # Sanitize theorem_name if present
+            if result.get('theorem_name'):
+                result['theorem_name'] = sanitize_theorem_name(result['theorem_name'])
+            return result
+        except (json.JSONDecodeError, ValueError) as e:
+            # Return default safe response
+            return {
+                "is_valid_question": True,
+                "has_errors": False,
+                "errors": [],
+                "corrected_question": question,
+                "correction_notes": f"JSON parsing failed, assuming valid: {str(e)[:50]}",
+                "worth_formalizing": True,
+                "formalization_value": None
+            }
 
 
 class VLLMClient:

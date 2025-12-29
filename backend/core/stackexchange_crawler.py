@@ -25,14 +25,18 @@ class StackExchangeCrawler(BaseCrawler):
     - etc.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, api_base: str = None, **kwargs):
         super().__init__(*args, **kwargs)
+        # API base URL (either passed as arg or from config)
+        self.api_base = api_base or self.config.get('api_base', 'https://api.stackexchange.com/2.3')
         self.api_key = None  # Add API key if available for higher rate limits
         # Get site parameter from config (default to 'math' for backward compatibility)
         self.site_param = self.config.get('site_param', 'math')
-        # Use a valid filter that includes body and answers
-        # Filter: !9_bDDxJY5 includes body, answers, comments
-        self.filter = '!9_bDDxJY5'
+        # Use filters that include body for both questions and answers
+        # Filter for questions: includes body, answer count, etc.
+        self.filter = '!*1SgQGNVK)Y'  # Includes question body and metadata
+        # Filter for answers: includes answer body
+        self.answer_filter = '!*S4CeCUIRL)Y'  # Includes answer body
         # Starting page for crawling (default: 1)
         self.start_page = self.config.get('start_page', 1)
         # Stop strategy: 'pages' (limit by pages_per_run) or 'questions' (limit by new_questions_count)
@@ -126,20 +130,40 @@ class StackExchangeCrawler(BaseCrawler):
 
     def fetch_answers(self, question_id: int) -> List[Dict[str, Any]]:
         """
-        Fetch answers for a question.
-
-        Note: In StackExchange crawler, answers are included in the question API response
-        when using the appropriate filter. This method is kept for compatibility.
+        Fetch answers for a question from StackExchange API.
 
         Args:
-            question_id: Question ID
+            question_id: Question ID (external ID from StackExchange)
 
         Returns:
             List of answer data dicts
         """
-        # Answers are fetched along with questions in parse_question
-        # This is a placeholder for potential separate answer fetching
-        return []
+        url = f"{self.api_base}/questions/{question_id}/answers"
+        params = {
+            'order': 'desc',
+            'sort': 'votes',
+            'site': self.site_param,
+            'filter': self.answer_filter,  # Use answer-specific filter with body
+            'key': self.api_key
+        }
+
+        # Remove None values
+        params = {k: v for k, v in params.items() if v is not None}
+
+        try:
+            response = self.session.get(url, params=params, timeout=self.timeout)
+            response.raise_for_status()
+            data = response.json()
+
+            if 'error_id' in data:
+                print(f"API Error fetching answers for question {question_id}: {data.get('error_message')}")
+                return []
+
+            return data.get('items', [])
+
+        except requests.exceptions.RequestException as e:
+            print(f"Failed to fetch answers for question {question_id}: {e}")
+            return []
 
     def _process_question(self, raw_data: Dict[str, Any]):
         """
@@ -149,7 +173,10 @@ class StackExchangeCrawler(BaseCrawler):
             raw_data: Raw question data from API
         """
         question = self.parse_question(raw_data)
-        raw_answers = raw_data.get('answers', [])
+        question_id = question.get('question_id')
+
+        # Fetch answers from API (since /questions endpoint doesn't include them)
+        raw_answers = self.fetch_answers(question_id)
 
         # Extract answers before saving question
         answers_data = []
@@ -182,33 +209,36 @@ class StackExchangeCrawler(BaseCrawler):
         if is_new:
             self.state.questions_crawled += 1
 
-        # Save answers (only if question is new to avoid redundant processing)
-        if is_new:
-            session = self.db.get_session()
-            try:
-                from backend.database.schema import Answer
+        # Save answers (both new and existing questions to ensure answers are populated)
+        session = self.db.get_session()
+        try:
+            from backend.database.schema import Answer
 
-                for ans_data in answers_data:
-                    ans_data['question_id'] = q_id
-                    ans_data['site_id'] = self.site_id
+            for ans_data in answers_data:
+                ans_data['question_id'] = q_id
+                ans_data['site_id'] = self.site_id
 
-                    # Check if answer exists
-                    existing = session.query(Answer).filter(
-                        Answer.answer_id == ans_data['answer_id'],
-                        Answer.site_id == self.site_id
-                    ).first()
+                # Check if answer exists
+                existing = session.query(Answer).filter(
+                    Answer.answer_id == ans_data['answer_id'],
+                    Answer.site_id == self.site_id
+                ).first()
 
-                    if not existing:
-                        answer = Answer(**ans_data)
-                        session.add(answer)
+                if not existing:
+                    # Create new answer
+                    answer = Answer(**ans_data)
+                    session.add(answer)
+                    if is_new:
                         self.state.answers_crawled += 1
+                # If answer exists, we could update it here if needed
+                # For now, we keep existing answers as-is
 
-                session.commit()
-            except Exception as e:
-                session.rollback()
-                print(f"Error saving answers: {e}")
-            finally:
-                session.close()
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            print(f"Error saving answers: {e}")
+        finally:
+            session.close()
 
     def _strip_html(self, html_content: str) -> str:
         """

@@ -8,9 +8,10 @@ from pathlib import Path
 
 from ..config import get_settings
 from ..database import DatabaseManager
+from ..version import BACKEND_VERSION
 from .routes import (
     crawlers_bp, statistics_bp, processing_bp,
-    database_bp, config_bp
+    database_bp, config_bp, verification_bp
 )
 
 
@@ -43,19 +44,23 @@ def create_app(config_path: str = None) -> Flask:
     # Setup logging
     setup_logging(app)
 
+    # Clean up any stuck preprocessing status from previous runs
+    cleanup_stuck_preprocessing(app)
+
     # Register blueprints
     app.register_blueprint(crawlers_bp, url_prefix='/api/crawlers')
     app.register_blueprint(statistics_bp, url_prefix='/api/statistics')
     app.register_blueprint(processing_bp, url_prefix='/api/processing')
     app.register_blueprint(database_bp, url_prefix='/api/database')
     app.register_blueprint(config_bp, url_prefix='/api/config')
+    app.register_blueprint(verification_bp, url_prefix='/api/verification')
 
     # Root endpoint
     @app.route('/')
     def index():
         return jsonify({
             'name': 'Web2Lean API',
-            'version': '1.0.0',
+            'version': BACKEND_VERSION,
             'status': 'running'
         })
 
@@ -90,3 +95,18 @@ def setup_logging(app: Flask):
             logging.StreamHandler()
         ]
     )
+
+
+def cleanup_stuck_preprocessing(app: Flask):
+    """
+    Clean up questions stuck in 'preprocessing' status on backend startup.
+
+    This handles cases where the backend was shut down while preprocessing was in progress.
+    """
+    try:
+        db = app.config['db']
+        count = db.cleanup_stuck_preprocessing()
+        if count > 0:
+            logging.info(f'Cleaned up {count} questions stuck in preprocessing status on startup')
+    except Exception as e:
+        logging.error(f'Error cleaning up stuck preprocessing on startup: {e}')

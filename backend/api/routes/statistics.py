@@ -39,3 +39,23 @@ def get_processing_statistics():
     db = current_app.config['db']
     stats = db.get_statistics()
     return jsonify(stats.get('processing_status', {}))
+
+
+@statistics_bp.route('/detailed', methods=['GET', 'OPTIONS'])
+def get_detailed_statistics():
+    """Get detailed statistics for dashboard."""
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    db = current_app.config['db']
+
+    # Get all detailed stats
+    site_stats = db.get_detailed_site_statistics()
+    preprocessing_stats = db.get_preprocessing_statistics()
+    verification_stats = db.get_verification_statistics()
+
+    return jsonify({
+        'by_site_detailed': site_stats,
+        'preprocessing': preprocessing_stats,
+        'verification': verification_stats,
+    })

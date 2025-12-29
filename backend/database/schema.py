@@ -130,8 +130,25 @@ class ProcessingStatus(Base):
     preprocessed_body = Column(Text)
     preprocessed_answer = Column(Text)
     correction_notes = Column(Text)
-    lean_code = Column(Text)
+    theorem_name = Column(Text)  # Generated theorem name for Lean conversion
+    preprocessing_version = Column(Text)  # Backend version used for preprocessing
+    formalization_value = Column(Text, default='medium')  # 'low', 'medium', 'high' - value for formalization
+    preprocessing_error = Column(Text)  # Error message if preprocessing failed
+    question_lean_code = Column(Text)  # Lean code for question (theorem/definition)
+    answer_lean_code = Column(Text)  # Lean code for answer (proof)
+    lean_code = Column(Text)  # Deprecated - kept for backward compatibility
     lean_error = Column(Text)
+
+    # Lean verification fields
+    verification_status = Column(Text)  # 'not_verified', 'verifying', 'passed', 'warning', 'failed', 'connection_error', 'error'
+    verification_has_errors = Column(Boolean, default=False)
+    verification_has_warnings = Column(Boolean, default=False)
+    verification_messages = Column(Text)  # JSON array of verification messages
+    verification_error = Column(Text)  # Error if verification failed
+    verification_time = Column(Float)  # Total verification time in seconds
+    verification_started_at = Column(Text)
+    verification_completed_at = Column(Text)
+
     processing_started_at = Column(Text)
     processing_completed_at = Column(Text)
     last_updated = Column(Text, default=lambda: datetime.now().isoformat(), onupdate=lambda: datetime.now().isoformat())
@@ -186,4 +203,29 @@ class ScheduledTask(Base):
 
     __table_args__ = (
         Index('idx_scheduled_tasks_type', 'task_type'),
+    )
+
+
+class LeanConversionResult(Base):
+    """Lean conversion results from different converters."""
+    __tablename__ = 'lean_conversion_results'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    question_id = Column(Integer, ForeignKey('questions.id'), nullable=False)
+    converter_name = Column(String(100), nullable=False, index=True)  # e.g., 'kimina-7b', 'glm-4'
+    converter_type = Column(String(50), nullable=False)  # 'local_model', 'api_llm', 'manual'
+    question_lean_code = Column(Text)  # Lean code for question (theorem/definition)
+    answer_lean_code = Column(Text)  # Lean code for answer (proof)
+    verification_status = Column(Text)  # 'not_verified', 'verifying', 'passed', 'warning', 'failed', 'error'
+    verification_has_errors = Column(Boolean, default=False)
+    verification_has_warnings = Column(Boolean, default=False)
+    verification_messages = Column(Text)  # JSON array of verification messages
+    verification_time = Column(Float)  # Verification time in seconds
+    conversion_time = Column(Float)  # Conversion time in seconds
+    error_message = Column(Text)  # Error if conversion failed
+    created_at = Column(Text, default=lambda: datetime.now().isoformat())
+
+    __table_args__ = (
+        Index('idx_lean_conversion_results_question', 'question_id'),
+        Index('idx_lean_conversion_results_converter', 'converter_name', 'question_id', unique=True),
     )

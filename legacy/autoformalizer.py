@@ -22,7 +22,7 @@ text = tokenizer.apply_chat_template(
     add_generation_prompt=True
 )
 
-sampling_params = SamplingParams(temperature=0.6, top_p=0.95, max_tokens=2048)
+sampling_params = SamplingParams(temperature=0.6, top_p=0.95, max_tokens=4096)
 output = model.generate(text, sampling_params=sampling_params)
 output_text = output[0].outputs[0].text
 print(output_text)

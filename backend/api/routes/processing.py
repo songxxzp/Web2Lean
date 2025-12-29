@@ -17,38 +17,67 @@ def start_lean_conversion():
     data = request.get_json() or {}
     limit = data.get('limit', 10)
     site_id = data.get('site_id')
+    converter_type = data.get('converter', 'kimina')  # 'kimina' or 'llm'
 
     db = current_app.config['db']
 
-    # Check if there's an active task
+    # Check if there's an active task for this specific converter type
     from ...processing import TaskManager
     task_manager = TaskManager()
-    active_task = task_manager.get_active_task('lean_conversion')
+    task_type = f'lean_conversion_{converter_type}'  # Unique task type per converter
+    active_task = task_manager.get_active_task(task_type)
     if active_task:
         return jsonify({
-            'error': 'Lean conversion already in progress',
+            'error': f'{converter_type.upper()} Lean conversion already in progress',
             'task_id': active_task.task_id,
             'progress': active_task.get_progress()
         }), 400
 
-    # Get questions ready for conversion (preprocessed but not yet converted)
-    questions = db.get_questions_by_status('preprocessed', limit=limit)
+    # Map converter type to converter name
+    converter_name_map = {
+        'kimina': 'Kimina-Legacy',
+        'llm': 'GLM-LLM-Agent'
+    }
+    converter_name = converter_name_map.get(converter_type, 'Kimina-Legacy')
+
+    # Get questions ready for conversion (preprocessed but not yet converted by this converter)
+    questions = db.get_questions_not_converted_by(converter_name, limit=limit)
 
     if not questions:
-        return jsonify({'message': 'No questions ready for Lean conversion'})
+        return jsonify({'message': f'No questions ready for {converter_name} conversion'})
 
-    # Create task
-    task = task_manager.create_task('lean_conversion', len(questions))
+    # Create task with converter-specific type
+    task = task_manager.create_task(task_type, len(questions))
 
-    # Import converter
+    # Import and instantiate the appropriate converter
     try:
-        from ...processing import LeanConverter
+        settings = current_app.config['settings']
 
-        converter = LeanConverter(
-            db_manager=db,
-            vllm_base_url=current_app.config['settings'].vllm_base_url,
-            model_path=current_app.config['settings'].vllm_model_path
-        )
+        # Choose converter based on request parameter
+        if converter_type == 'llm':
+            # Use LLM-based converter
+            from ...processing import LLMLeanConverter
+
+            converter = LLMLeanConverter(
+                db_manager=db,
+                api_key=settings.zhipu_api_key,
+                model=settings.glm_lean_model,
+                kimina_url=settings.kimina_url,
+                max_iterations=settings.lean_max_iterations,
+                temperature=0.2,
+                max_tokens=4096,
+                converter_name=converter_name  # Pass converter name
+            )
+        else:
+            # Use local Kimina converter
+            from ...processing import LeanConverter
+
+            converter = LeanConverter(
+                db_manager=db,
+                vllm_base_url=settings.vllm_base_url,
+                model_path=settings.vllm_model_path,
+                converter_name=converter_name  # Pass converter name
+            )
 
         def process_questions():
             for q in questions:
@@ -126,69 +155,78 @@ def start_preprocessing():
     try:
         from ...processing import LLMProcessor
 
+        settings = current_app.config['settings']
         processor = LLMProcessor(
             db_manager=db,
-            api_key=current_app.config['settings'].zhipu_api_key,
-            text_model=current_app.config['settings'].glm_text_model,
-            vision_model=current_app.config['settings'].glm_vision_model
+            api_key=settings.zhipu_api_key,
+            text_model=settings.glm_text_model,
+            vision_model=settings.glm_vision_model,
+            max_length=settings.preprocessing_max_length
         )
 
+        concurrency = settings.preprocessing_concurrency
+
         def process_questions():
-            for i, q in enumerate(questions):
-                # Check if task is paused
-                task.wait_if_paused()
+            # Process questions in batches with concurrency
+            batch_size = concurrency * 2  # Process in batches to avoid overwhelming the system
 
-                # Check if task is stopped
-                if task.is_stopped():
-                    break
+            try:
+                for batch_start in range(0, len(questions), batch_size):
+                    # Check if task is paused
+                    task.wait_if_paused()
 
-                if site_id and q['site_id'] != site_id:
-                    continue
+                    # Check if task is stopped
+                    if task.is_stopped():
+                        break
 
-                task.current_question_id = q['id']
+                    batch = questions[batch_start:batch_start + batch_size]
 
-                # Add delay between requests to avoid rate limiting
-                if i > 0:
-                    time.sleep(2)  # Wait 2 seconds between requests
+                    # Filter by site_id if specified
+                    if site_id:
+                        batch = [q for q in batch if q['site_id'] == site_id]
 
-                # Retry logic for rate limiting
-                max_retries = 3
-                success = False
-                for attempt in range(max_retries):
-                    try:
-                        processor.process_question(q['id'])
-                        success = True
-                        break  # Success, move to next question
-                    except Exception as e:
-                        error_str = str(e)
-                        if '429' in error_str or 'Too Many Requests' in error_str:
-                            # Rate limited - wait and retry
-                            if attempt < max_retries - 1:
-                                wait_time = (attempt + 1) * 5  # Exponential backoff: 5s, 10s, 15s
-                                print(f"Rate limited on question {q['id']}, waiting {wait_time}s before retry {attempt + 1}/{max_retries}")
-                                time.sleep(wait_time)
-                                continue
-                            else:
-                                print(f"Error preprocessing question {q['id']}: Rate limited after {max_retries} retries")
-                        else:
-                            # Other errors - don't retry
-                            print(f"Error preprocessing question {q['id']}: {e}")
-                            break
+                    if not batch:
+                        continue
 
-                task.increment_progress(success=success)
+                    # Extract question IDs
+                    question_ids = [q['id'] for q in batch]
 
-            # Mark task as completed
-            task.status = 'completed'
-            task.completed_at = task.completed_at or __import__('datetime').datetime.now()
-            task.current_question_id = None
+                    # Process batch concurrently
+                    results = processor.process_questions_batch(
+                        question_ids,
+                        concurrency=concurrency
+                    )
+
+                    # Update task progress
+                    for result in results:
+                        success = result.get('success', False)
+                        task.increment_progress(success=success)
+
+                    # Add delay between batches to avoid rate limiting
+                    if batch_start + batch_size < len(questions):
+                        time.sleep(3)  # Wait 3 seconds between batches
+
+                # Mark task as completed
+                task.status = 'completed'
+                task.completed_at = task.completed_at or __import__('datetime').datetime.now()
+                task.current_question_id = None
+
+            finally:
+                # Always clean up any stuck preprocessing status when task ends
+                try:
+                    db.cleanup_stuck_preprocessing()
+                except Exception as e:
+                    logging = __import__('logging').getLogger(__name__)
+                    logging.error(f'Error cleaning up stuck preprocessing after task completion: {e}')
 
         thread = threading.Thread(target=process_questions, daemon=True)
         thread.start()
 
         return jsonify({
-            'message': f'Started preprocessing for {len(questions)} questions',
+            'message': f'Started preprocessing for {len(questions)} questions with concurrency={concurrency}',
             'task_id': task.task_id,
             'count': len(questions),
+            'concurrency': concurrency,
             'progress': task.get_progress()
         })
 
@@ -257,6 +295,17 @@ def stop_task(task_id: str):
     task_manager = TaskManager()
 
     if task_manager.stop_task(task_id):
+        # Clean up any questions stuck in preprocessing status
+        db = current_app.config['db']
+        try:
+            count = db.cleanup_stuck_preprocessing()
+            if count > 0:
+                return jsonify({'message': f'Task stopped and cleaned up {count} stuck questions'})
+        except Exception as e:
+            # Log error but don't fail the stop operation
+            logging = __import__('logging').getLogger(__name__)
+            logging.error(f'Error cleaning up stuck preprocessing after stopping task: {e}')
+
         return jsonify({'message': 'Task stopped'})
 
     return jsonify({'error': 'Task not found'}), 404
