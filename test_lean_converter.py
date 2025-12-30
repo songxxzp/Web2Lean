@@ -192,8 +192,12 @@ class DebugLLMLeanConverter(LLMLeanConverter):
                 'error': error_msg,
                 'success': False
             })
+            # Print traceback for debugging
+            import traceback
+            traceback.print_exc()
 
             raise
+
 
     def _verify_lean_code(self, lean_code: str) -> Dict[str, Any]:
         """Verify Lean code with logging"""
@@ -302,6 +306,8 @@ class DebugLLMLeanConverter(LLMLeanConverter):
                 self._log_lean_code(current_lean, f"CORRECTED LEAN CODE (Iteration {iteration})")
 
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 if self.verbose:
                     print(f"✗ Error during correction iteration {iteration}: {e}")
                 break
@@ -611,6 +617,8 @@ def interactive_mode(settings):
                 limit = int(list_limit) if list_limit.isdigit() else 20
                 list_preprocessed_questions(db, limit)
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 print(f"Error: {e}")
 
         elif choice == '2':
@@ -644,6 +652,8 @@ def interactive_mode(settings):
                 print("\n✓ Conversion completed!")
 
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 print(f"\n✗ Error: {e}")
 
         elif choice == '3':
@@ -667,6 +677,8 @@ def interactive_mode(settings):
                 result = converter.convert_question(question_id, verify_only=True)
 
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 print(f"\n✗ Error: {e}")
 
         elif choice == '4':
@@ -680,6 +692,8 @@ def interactive_mode(settings):
                 view_question_details(db, int(question_id))
 
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 print(f"Error: {e}")
 
         elif choice == '5':
