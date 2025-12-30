@@ -33,10 +33,10 @@ class StackExchangeCrawler(BaseCrawler):
         # Get site parameter from config (default to 'math' for backward compatibility)
         self.site_param = self.config.get('site_param', 'math')
         # Use filters that include body for both questions and answers
-        # Filter for questions: includes body, answer count, etc.
-        self.filter = '!*1SgQGNVK)Y'  # Includes question body and metadata
+        # Using standard StackExchange API filters
+        self.filter = 'withbody'  # Includes question body and metadata
         # Filter for answers: includes answer body
-        self.answer_filter = '!*S4CeCUIRL)Y'  # Includes answer body
+        self.answer_filter = 'withbody'  # Includes answer body
         # Starting page for crawling (default: 1)
         self.start_page = self.config.get('start_page', 1)
         # Stop strategy: 'pages' (limit by pages_per_run) or 'questions' (limit by new_questions_count)
