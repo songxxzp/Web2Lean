@@ -594,7 +594,7 @@ async function showDetail(row) {
 
     // Load lean conversion results
     try {
-      const response = await fetch(`http://localhost:5000/api/database/questions/${row.id}/lean-conversions`)
+      const response = await fetch(`/api/database/questions/${row.id}/lean-conversions`)
       const data = await response.json()
       leanConversions.value = data.results || []
 
@@ -672,7 +672,7 @@ function getVerificationStatusLabel(status) {
 // Load available converters for clearing dialog
 async function loadAvailableConverters() {
   try {
-    const response = await fetch('http://localhost:5000/api/database/lean-conversions/converters')
+    const response = await fetch('/api/database/lean-conversions/converters')
     const data = await response.json()
     availableConverters.value = data.converters || []
   } catch (error) {
@@ -716,7 +716,7 @@ async function clearSelectedConverters() {
 
   try {
     clearingConverters.value = true
-    const response = await fetch('http://localhost:5000/api/database/lean-conversions/clear', {
+    const response = await fetch('/api/database/lean-conversions/clear', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ converters: selectedConvertersToClear.value })
@@ -741,7 +741,7 @@ async function clearSelectedConverters() {
 // Show preprocessing version selection dialog
 async function showVersionClearDialog() {
   try {
-    const response = await fetch('http://localhost:5000/api/database/preprocessing-versions')
+    const response = await fetch('/api/database/preprocessing-versions')
     const data = await response.json()
 
     if (response.ok) {
@@ -780,7 +780,7 @@ async function clearSelectedVersions() {
 
   try {
     clearingVersions.value = true
-    const response = await fetch('http://localhost:5000/api/database/clear', {
+    const response = await fetch('/api/database/clear', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ stage: 'preprocess', versions: selectedVersionsToClear.value })

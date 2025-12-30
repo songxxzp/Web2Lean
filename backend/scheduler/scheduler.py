@@ -206,9 +206,33 @@ class TaskScheduler:
                 self.running_tasks.remove(task.task_name)
             logger.debug(f"Task {task.task_name} marked as finished")
 
-        # Check if task is still enabled
-        if not task.enabled:
-            logger.debug(f"Task {task.task_name} is disabled, not checking for missed runs")
+        # Re-fetch task from database to get current state
+        try:
+            session = self.db.get_session()
+            from backend.database.schema import ScheduledTask
+            current_task = session.query(ScheduledTask).filter(
+                ScheduledTask.task_name == task.task_name
+            ).first()
+            session.close()
+
+            # If task no longer exists or is disabled, clear next_run to prevent catchup loop
+            if not current_task or not current_task.enabled:
+                logger.info(f"Task {task.task_name} is disabled or missing, clearing next_run time")
+                if current_task:
+                    session = self.db.get_session()
+                    try:
+                        current_task.next_run = None
+                        session.commit()
+                    finally:
+                        session.close()
+                return
+
+            # Use the current task from database for further checks
+            task = current_task
+
+        except Exception as e:
+            logger.error(f"Error fetching current task state for {task.task_name}: {e}")
+            # On error, assume task is disabled to be safe
             return
 
         # Calculate the interval
@@ -227,6 +251,25 @@ class TaskScheduler:
                 from datetime import datetime
                 next_run_time = datetime.fromisoformat(task.next_run)
                 now = datetime.now()
+
+                # Only catch up if next_run is not too old (more than 2 intervals ago)
+                # This prevents infinite loops for long-disabled tasks
+                max_catchup_delay = timedelta(minutes=total_minutes * 2)
+                if next_run_time < now - max_catchup_delay:
+                    logger.warning(f"Task {task.task_name} next_run is too old ({next_run_time}), skipping catchup")
+                    # Clear next_run to prevent repeated catchup attempts
+                    try:
+                        session = self.db.get_session()
+                        current_task = session.query(ScheduledTask).filter(
+                            ScheduledTask.task_name == task.task_name
+                        ).first()
+                        if current_task:
+                            current_task.next_run = None
+                            session.commit()
+                        session.close()
+                    except:
+                        pass
+                    return
 
                 if next_run_time < now:
                     # We missed at least one scheduled run
