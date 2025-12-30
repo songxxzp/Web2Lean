@@ -105,6 +105,16 @@ case $COMMAND in
         curl http://localhost:5000/api/statistics/overview
         ;;
 
+    test-crawler|crawler-cli)
+        echo "Starting interactive crawler CLI..."
+        python test_crawler.py
+        ;;
+
+    test-lean-converter|lean-cli)
+        echo "Starting interactive Lean converter CLI..."
+        python test_lean_converter.py
+        ;;
+
     logs)
         echo "Showing backend logs (Ctrl+C to exit)..."
         tail -f logs/backend.log
@@ -133,6 +143,10 @@ case $COMMAND in
         echo "  install-frontend  - 安装前端依赖"
         echo "  crawl [site]      - 启动爬虫 (默认: math_stackexchange)"
         echo "  test              - 测试 API 连接"
+        echo "  test-crawler      - 启动交互式爬虫调试工具"
+        echo "  crawler-cli       - 同 'test-crawler'"
+        echo "  test-lean-converter - 启动交互式Lean转换器调试工具"
+        echo "  lean-cli          - 同 'test-lean-converter'"
         echo ""
         echo "示例:"
         echo "  ./start.sh start-bg      # 后台启动后端"
