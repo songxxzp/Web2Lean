@@ -16,6 +16,12 @@ import logging
 
 from ..database import DatabaseManager
 from ..utils import VLLMClient, ZhipuClient
+from ..utils.prompts import (
+    LEAN_QUESTION_PROMPT,
+    LEAN_WITH_ANSWER_PROMPT,
+    LEAN_CORRECTION_PROMPT,
+    sanitize_theorem_name
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +35,7 @@ class LeanConverter:
         vllm_base_url: str = "http://localhost:8000/v1",
         model_path: str = "/root/Kimina-Autoformalizer-7B",
         converter_name: str = "Kimina-Legacy"
+        # TODO: add max_tokens
     ):
         """
         Initialize Lean converter.
@@ -74,9 +81,6 @@ class LeanConverter:
         )
 
         try:
-            # Import sanitize function
-            from ..utils.prompts import sanitize_theorem_name
-
             # Use preprocessed content if available
             body = status.get('preprocessed_body') or question['body']
             answer = status.get('preprocessed_answer')
@@ -392,93 +396,6 @@ class LeanConverter:
 class LLMLeanConverter:
     """Convert mathematical problems to Lean 4 using GLM LLM with iterative correction."""
 
-    # Prompts for Lean conversion
-    QUESTION_ONLY_PROMPT = """You are an expert in Lean 4 formalization. Your task is to convert a mathematical problem statement into a Lean 4 theorem declaration.
-
-IMPORTANT REQUIREMENTS:
-1. Create a theorem DECLARATION only - end with ':= by sorry' (no proof needed)
-2. Use proper imports (e.g., import Mathlib)
-3. Define all necessary variables and hypotheses
-4. State the theorem clearly and precisely
-5. Do NOT provide any proof - use ':= by sorry' at the end
-
-Output format:
-```lean
-import Mathlib
-
-variable (α : Type*} [PartialOrder α]
-
-theorem theorem_name (h1 : hypothesis1) (h2 : hypothesis2) : conclusion := by
-  sorry
-```
-
-Convert this problem to Lean 4:
-
-{problem}
-"""
-
-    QUESTION_WITH_ANSWER_PROMPT = """You are an expert in Lean 4 formalization. Your task is to convert a mathematical problem AND its solution into a complete, verifiable Lean 4 theorem with proof.
-
-IMPORTANT REQUIREMENTS:
-1. Use proper imports from Mathlib
-2. Define all necessary variables, types, and hypotheses
-3. State the theorem precisely
-4. Provide a COMPLETE, RIGOROUS proof using Lean 4 tactics
-5. Ensure the proof is verifiable by Lean 4
-6. Use appropriate tactics (simp, rw, apply, exact, etc.)
-
-Common tactics to use:
-- `simp` for simplification
-- `rw` for rewriting
-- `apply` for applying lemmas
-- `exact` for exact terms
-- `linarith` for linear arithmetic
-- `norm_num` for numerical normalization
-- `aesop` for automated proofs
-- `by` tactic combinator
-
-Output format:
-```lean
-import Mathlib
-
-variable (α : Type*} [PartialOrder α]
-
-theorem theorem_name (h1 : hypothesis1) : conclusion := by
-  tactic1
-  tactic2
-  -- more tactics
-  exact final_result
-```
-
-Convert this problem AND solution to Lean 4:
-
-PROBLEM:
-{problem}
-
-SOLUTION:
-{answer}
-"""
-
-    CORRECTION_PROMPT = """You are an expert in Lean 4 formalization. The Lean verifier found errors in your previous attempt. 
-
-IMPORTANT: Fix the errors based on the feedback below. Keep what works and fix only what doesn't.
-
-Previous Lean code:
-```lean
-{previous_lean}
-```
-
-Errors from Lean verifier:
-{error_message}
-
-Your task:
-1. Analyze each error carefully
-2. Fix ONLY the problematic parts
-3. Maintain the overall structure
-4. Ensure the corrected code compiles in Lean 4
-
-Provide the complete corrected Lean 4 code:"""
-
     def __init__(
         self,
         db_manager: DatabaseManager,
@@ -487,7 +404,7 @@ Provide the complete corrected Lean 4 code:"""
         kimina_url: str = "http://127.0.0.1:9000",
         max_iterations: int = 1,
         temperature: float = 0.2,
-        max_tokens: int = 4096,
+        max_tokens: int = 16000,
         converter_name: str = None
     ):
         """
@@ -543,8 +460,6 @@ Provide the complete corrected Lean 4 code:"""
         )
 
         try:
-            from ..utils.prompts import sanitize_theorem_name
-
             # Use preprocessed content if available
             body = status.get('preprocessed_body') or question['body']
             answer = status.get('preprocessed_answer')
@@ -657,9 +572,9 @@ Provide the complete corrected Lean 4 code:"""
         """
         # Generate initial Lean code
         if lean_type == "question" or answer is None:
-            prompt = self.QUESTION_ONLY_PROMPT.replace('{problem}', body)
+            prompt = LEAN_QUESTION_PROMPT.replace('{problem}', body)
         else:
-            prompt = self.QUESTION_WITH_ANSWER_PROMPT.replace('{problem}', body).replace('{answer}', answer)
+            prompt = LEAN_WITH_ANSWER_PROMPT.replace('{problem}', body).replace('{answer}', answer)
 
         prompt += f"\n\nUse the theorem name: {theorem_name}"
 
@@ -683,7 +598,7 @@ Provide the complete corrected Lean 4 code:"""
 
             # Generate correction prompt
             error_message = self._format_error_message(verification.get('messages', []))
-            correction_prompt = self.CORRECTION_PROMPT.replace('{previous_lean}', current_lean).replace('{error_message}', error_message)
+            correction_prompt = LEAN_CORRECTION_PROMPT.replace('{previous_lean}', current_lean).replace('{error_message}', error_message)
 
             # Get corrected code
             try:
@@ -742,10 +657,10 @@ Provide the complete corrected Lean 4 code:"""
             response = client.check(lean_code, show_progress=False)
 
             # Parse KiminaClient response
-            # env values from Kimina:
-            # 7, 8 = passed (no errors)
-            # 9 = warning (e.g., uses 'sorry')
-            # 10 = error (compilation failed)
+            # env: nevermind
+            # messages_raw: nevermind if not exist(Passed).
+            # severity - info, warning: passed with minor issue.
+            # severity - error: not passed.
             if not response.results or len(response.results) == 0:
                 return {
                     'status': 'error',
@@ -757,22 +672,14 @@ Provide the complete corrected Lean 4 code:"""
 
             result = response.results[0]
             resp_data = result.response
-            env = resp_data.get('env', 0)
+            # env = resp_data.get('env', 0)
             messages_raw = resp_data.get('messages', [])
             verification_time = result.time
 
             # Map env to status
-            if env in [7, 8]:  # Passed
+            if len(messages_raw) == 0:  # Passed
                 status = 'passed'
                 has_errors = False
-                has_warnings = False
-            elif env == 9:  # Warning
-                status = 'warning'
-                has_errors = False
-                has_warnings = True
-            elif env == 10:  # Error
-                status = 'error'
-                has_errors = True
                 has_warnings = False
             else:
                 # Unknown env value, check messages
