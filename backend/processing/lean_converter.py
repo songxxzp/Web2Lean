@@ -127,28 +127,18 @@ class LeanConverter:
             }
 
         except Exception as e:
-            # Determine if this is a program error
+            # Log error but don't change status - record in lean_error field only
             error_msg = str(e)
-            is_program_error = self._is_program_error(error_msg)
+            logger.error(f"Lean conversion error for question {question_internal_id}: {error_msg}")
 
-            if is_program_error:
-                # Program error - mark as failed (can retry)
-                self.db.update_processing_status(
-                    question_internal_id,
-                    status='failed',
-                    lean_error=f"Lean conversion program error: {error_msg}",
-                    processing_completed_at=self._now()
-                )
-                raise
-            else:
-                # Other error - also mark as failed but with different message
-                self.db.update_processing_status(
-                    question_internal_id,
-                    status='failed',
-                    lean_error=f"Lean conversion error: {error_msg}",
-                    processing_completed_at=self._now()
-                )
-                raise
+            # Keep status as 'preprocessed', just record the error
+            # This allows users to see the error in the UI without marking the question as failed
+            self.db.update_processing_status(
+                question_internal_id,
+                lean_error=f"Lean conversion error: {error_msg}",
+                processing_completed_at=self._now()
+            )
+            raise
 
     def _convert_question_to_lean(self, title: str, body: str) -> str:
         """
@@ -531,25 +521,14 @@ class LLMLeanConverter:
             error_msg = str(e)
             logger.error(f"LLM Lean conversion error for question {question_internal_id}: {error_msg}")
 
-            # Determine error type
-            is_program_error = self._is_program_error(error_msg)
-
-            if is_program_error:
-                self.db.update_processing_status(
-                    question_internal_id,
-                    status='failed',
-                    lean_error=f"LLM Lean conversion program error: {error_msg}",
-                    processing_completed_at=self._now()
-                )
-                raise
-            else:
-                self.db.update_processing_status(
-                    question_internal_id,
-                    status='failed',
-                    lean_error=f"LLM Lean conversion error: {error_msg}",
-                    processing_completed_at=self._now()
-                )
-                raise
+            # Don't change status to 'failed' - just record error in lean_error field
+            # Keep status as 'preprocessed' so the question remains usable
+            self.db.update_processing_status(
+                question_internal_id,
+                lean_error=f"LLM Lean conversion error: {error_msg}",
+                processing_completed_at=self._now()
+            )
+            raise
 
     def _convert_with_correction(
         self,

@@ -326,6 +326,22 @@
               </el-alert>
             </div>
 
+            <!-- Show Lean conversion error first -->
+            <div v-if="getCurrentConversion() && getCurrentConversion().error_message" style="margin-bottom: 1rem;">
+              <el-alert type="error" :closable="false">
+                <strong>Lean Conversion Failed:</strong>
+                <div style="margin-top: 0.5rem; white-space: pre-wrap;">{{ getCurrentConversion().error_message }}</div>
+              </el-alert>
+            </div>
+
+            <!-- Show processing_status lean_error if no conversion results but there's an error -->
+            <div v-else-if="!getCurrentConversion() && selectedQuestion.processing_status?.lean_error" style="margin-bottom: 1rem;">
+              <el-alert type="error" :closable="false">
+                <strong>Lean Conversion Error:</strong>
+                <div style="margin-top: 0.5rem; white-space: pre-wrap;">{{ selectedQuestion.processing_status.lean_error }}</div>
+              </el-alert>
+            </div>
+
             <!-- Show Lean code split into question and answer -->
             <div v-if="getCurrentConversion() && (getCurrentConversion().question_lean_code || getCurrentConversion().answer_lean_code)">
               <!-- Question Lean Code (Theorem Declaration Only) -->
