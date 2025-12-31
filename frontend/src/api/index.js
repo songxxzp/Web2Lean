@@ -172,8 +172,8 @@ export const databaseApi = {
  * Configuration API
  */
 export const configApi = {
-  getSites: () =>
-    apiRequest('/config/sites'),
+  getSites: async () =>
+    (await apiRequest('/config/sites')).sites || [],
 
   addSite: (siteData) =>
     apiRequest('/config/sites', {
