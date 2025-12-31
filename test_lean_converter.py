@@ -201,18 +201,19 @@ class DebugLLMLeanConverter(LLMLeanConverter):
 
     def _verify_lean_code(self, lean_code: str) -> Dict[str, Any]:
         """Verify Lean code with logging"""
-        endpoint = f"{self.kimina_url}/verify"
+        # Note: Now using KiminaClient.check() instead of /verify endpoint
 
         if self.show_requests:
             print(f"\n[VERIFICATION REQUEST] {datetime.now().strftime('%H:%M:%S')}")
-            print(f"URL: {endpoint}")
+            print(f"Method: KiminaClient.check()")
+            print(f"URL: {self.kimina_url}")
             print(f"Code length: {len(lean_code)} chars")
             print(f"Code preview:\n{lean_code[:300]}")
             if len(lean_code) > 300:
                 print("... (truncated)")
             print()
 
-        # Call parent method but add logging
+        # Call parent method (now uses KiminaClient)
         result = super()._verify_lean_code(lean_code)
 
         self._log_verification(result)

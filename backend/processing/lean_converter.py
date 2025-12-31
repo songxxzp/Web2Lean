@@ -735,25 +735,64 @@ Provide the complete corrected Lean 4 code:"""
         Returns:
             Verification result dict
         """
-        import requests
-        import json
-
         try:
-            response = requests.post(
-                f"{self.kimina_url}/verify",
-                json={"code": lean_code},
-                timeout=30
-            )
-            response.raise_for_status()
+            from kimina_client import KiminaClient
 
-            result = response.json()
+            client = KiminaClient(api_url=self.kimina_url)
+            response = client.check(lean_code, show_progress=False)
 
-            # Parse result
-            status = result.get('status', 'error')
-            messages = result.get('messages', [])
-            has_errors = result.get('has_errors', False)
-            has_warnings = result.get('has_warnings', False)
-            verification_time = result.get('time', 0.0)
+            # Parse KiminaClient response
+            # env values from Kimina:
+            # 7, 8 = passed (no errors)
+            # 9 = warning (e.g., uses 'sorry')
+            # 10 = error (compilation failed)
+            if not response.results or len(response.results) == 0:
+                return {
+                    'status': 'error',
+                    'messages': [{'severity': 'error', 'line': 0, 'message': 'No response from verifier'}],
+                    'has_errors': True,
+                    'has_warnings': False,
+                    'time': 0.0
+                }
+
+            result = response.results[0]
+            resp_data = result.response
+            env = resp_data.get('env', 0)
+            messages_raw = resp_data.get('messages', [])
+            verification_time = result.time
+
+            # Map env to status
+            if env in [7, 8]:  # Passed
+                status = 'passed'
+                has_errors = False
+                has_warnings = False
+            elif env == 9:  # Warning
+                status = 'warning'
+                has_errors = False
+                has_warnings = True
+            elif env == 10:  # Error
+                status = 'error'
+                has_errors = True
+                has_warnings = False
+            else:
+                # Unknown env value, check messages
+                has_errors = any(msg.get('severity') == 'error' for msg in messages_raw)
+                has_warnings = any(msg.get('severity') == 'warning' for msg in messages_raw)
+                status = 'error' if has_errors else ('warning' if has_warnings else 'passed')
+
+            # Parse messages into our format
+            messages = []
+            for msg in messages_raw:
+                severity = msg.get('severity', 'error')
+                pos = msg.get('pos', {})
+                line = pos.get('line', 0)
+                message_text = msg.get('data', 'Unknown error')
+
+                messages.append({
+                    'severity': severity,
+                    'line': line,
+                    'message': message_text
+                })
 
             return {
                 'status': status,
@@ -763,11 +802,11 @@ Provide the complete corrected Lean 4 code:"""
                 'time': verification_time
             }
 
-        except requests.RequestException as e:
-            logger.warning(f"Lean verification request failed: {e}")
+        except ImportError:
+            logger.error("kimina_client not installed. Install with: pip install kimina-client")
             return {
-                'status': 'connection_error',
-                'messages': [{'severity': 'error', 'line': 0, 'message': f'Verification server error: {str(e)}'}],
+                'status': 'error',
+                'messages': [{'severity': 'error', 'line': 0, 'message': 'kimina_client not installed'}],
                 'has_errors': True,
                 'has_warnings': False,
                 'time': 0.0
