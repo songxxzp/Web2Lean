@@ -456,12 +456,13 @@ class LLMLeanConverter:
             theorem_name = status.get('theorem_name') or sanitize_theorem_name(question['title'])
 
             # Convert question to Lean (with sorry)
-            question_lean = self._convert_with_correction(
+            question_result = self._convert_with_correction(
                 theorem_name=theorem_name,
                 body=body,
                 answer=None,
                 lean_type="question"
             )
+            question_lean = question_result['lean_code']
 
             # Convert answer to Lean if available
             answer_lean = None

@@ -28,6 +28,11 @@ sys.path.insert(0, str(project_root))
 from backend.database import DatabaseManager
 from backend.config.settings import Settings
 from backend.processing.lean_converter import LLMLeanConverter
+from backend.utils.prompts import (
+    LEAN_QUESTION_PROMPT,
+    LEAN_WITH_ANSWER_PROMPT,
+    LEAN_CORRECTION_PROMPT
+)
 
 
 class DebugLLMLeanConverter(LLMLeanConverter):
@@ -247,9 +252,9 @@ class DebugLLMLeanConverter(LLMLeanConverter):
 
         # Generate initial Lean code
         if lean_type == "question" or answer is None:
-            prompt = self.QUESTION_ONLY_PROMPT.replace('{problem}', body)
+            prompt = LEAN_QUESTION_PROMPT.replace('{problem}', body)
         else:
-            prompt = self.QUESTION_WITH_ANSWER_PROMPT.replace('{problem}', body).replace('{answer}', answer)
+            prompt = LEAN_WITH_ANSWER_PROMPT.replace('{problem}', body).replace('{answer}', answer)
 
         prompt += f"\n\nUse the theorem name: {theorem_name}"
 
@@ -287,7 +292,7 @@ class DebugLLMLeanConverter(LLMLeanConverter):
 
             # Generate correction prompt
             error_message = self._format_error_message(verification.get('messages', []))
-            correction_prompt = self.CORRECTION_PROMPT.replace('{previous_lean}', current_lean).replace('{error_message}', error_message)
+            correction_prompt = LEAN_CORRECTION_PROMPT.replace('{previous_lean}', current_lean).replace('{error_message}', error_message)
 
             if self.show_requests:
                 print(f"\n[CORRECTION PROMPT]")
