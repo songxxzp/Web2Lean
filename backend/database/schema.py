@@ -132,7 +132,7 @@ class ProcessingStatus(Base):
     correction_notes = Column(Text)
     theorem_name = Column(Text)  # Generated theorem name for Lean conversion
     preprocessing_version = Column(Text)  # Backend version used for preprocessing
-    formalization_value = Column(Text, default='medium')  # 'low', 'medium', 'high' - value for formalization
+    formalization_value = Column(Text, default=None)  # 'low', 'medium', 'high' - value for formalization (set during preprocessing)
     preprocessing_error = Column(Text)  # Error message if preprocessing failed
     question_lean_code = Column(Text)  # Lean code for question (theorem/definition)
     answer_lean_code = Column(Text)  # Lean code for answer (proof)
