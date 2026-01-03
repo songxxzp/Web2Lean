@@ -204,7 +204,7 @@
           <!-- Raw Question and Answers -->
           <el-tab-pane label="Raw Content" name="raw">
             <h4>Question</h4>
-            <div class="content">{{ selectedQuestion.body }}</div>
+            <div class="content" v-html="renderedBody"></div>
 
             <el-divider style="margin: 1.5rem 0;" />
 
@@ -216,7 +216,7 @@
                   <el-tag v-else type="info" size="small">Answer {{ index + 1 }}</el-tag>
                   <el-tag size="small">Score: {{ answer.score }}</el-tag>
                 </div>
-                <div class="content">{{ answer.body }}</div>
+                <div class="content" v-html="renderMathContent(answer.body)"></div>
               </div>
             </div>
             <div v-else class="content" style="color: #999; font-style: italic;">
@@ -246,11 +246,11 @@
             <!-- Show preprocessed content if available -->
             <div v-else-if="selectedQuestion.processing_status?.preprocessed_body">
               <h4>Preprocessed Question</h4>
-              <div class="content">{{ selectedQuestion.processing_status.preprocessed_body }}</div>
+              <div class="content" v-html="renderedPreprocessedBody"></div>
 
               <div v-if="selectedQuestion.processing_status.preprocessed_answer">
                 <h4 style="margin-top: 1rem;">Preprocessed Answer</h4>
-                <div class="content">{{ selectedQuestion.processing_status.preprocessed_answer }}</div>
+                <div class="content" v-html="renderedPreprocessedAnswer"></div>
               </div>
 
               <div v-if="selectedQuestion.processing_status.correction_notes" style="margin-top: 1rem;">
@@ -507,6 +507,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { databaseApi, configApi, verificationApi } from '@/api'
+import { renderContent } from '@/utils/mathRenderer'
 
 const filters = ref({
   site_id: null,
@@ -525,6 +526,22 @@ const jumpPage = ref(1)
 const maxPages = computed(() => {
   const totalPages = Math.ceil(pagination.value.total / pagination.value.pageSize)
   return totalPages > 0 ? totalPages : 1
+})
+
+// Rendered content with math support
+const renderedBody = computed(() => {
+  if (!selectedQuestion.value?.body) return ''
+  return renderContent(selectedQuestion.value.body)
+})
+
+const renderedPreprocessedBody = computed(() => {
+  if (!selectedQuestion.value?.processing_status?.preprocessed_body) return ''
+  return renderContent(selectedQuestion.value.processing_status.preprocessed_body)
+})
+
+const renderedPreprocessedAnswer = computed(() => {
+  if (!selectedQuestion.value?.processing_status?.preprocessed_answer) return ''
+  return renderContent(selectedQuestion.value.processing_status.preprocessed_answer)
 })
 
 const questions = ref([])
@@ -649,6 +666,12 @@ function formalizationTagType(value) {
     high: 'success'
   }
   return types[value] || 'info'
+}
+
+// Render math content for answers
+function renderMathContent(text) {
+  if (!text) return ''
+  return renderContent(text)
 }
 
 function getFormalizationValueType(value) {
