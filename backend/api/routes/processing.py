@@ -65,7 +65,7 @@ def start_lean_conversion():
                 kimina_url=settings.kimina_url,
                 max_iterations=settings.lean_max_iterations,
                 temperature=0.2,
-                max_tokens=4096,
+                max_tokens=settings.lean_conversion_max_tokens,
                 converter_name=converter_name  # Pass converter name
             )
         else:
