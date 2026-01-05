@@ -101,12 +101,14 @@ def verify_all_lean():
                 if task.is_stopped():
                     break
 
-                task.current_question_id = q['id']
+                # Use question_id (internal_id) instead of id
+                question_internal_id = q['question_id']
+                task.current_question_id = question_internal_id
                 try:
-                    verifier.verify_question(q['id'])
+                    verifier.verify_question(question_internal_id)
                     task.increment_progress(success=True)
                 except Exception as e:
-                    print(f"Error verifying question {q['id']}: {e}")
+                    print(f"Error verifying question {question_internal_id}: {e}")
                     task.increment_progress(success=False)
 
             # Mark task as completed
