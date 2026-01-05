@@ -212,6 +212,98 @@ class LeanVerifier:
             else:
                 raise
 
+    def verify_conversion_result(self, result_id: int) -> Dict[str, Any]:
+        """
+        Verify Lean code for a specific conversion result.
+
+        Args:
+            result_id: Lean conversion result ID
+
+        Returns:
+            Verification result
+        """
+        from ..database import LeanConversionResult
+
+        # Get conversion result
+        session = self.db.get_session()
+        try:
+            result = session.query(LeanConversionResult).filter(
+                LeanConversionResult.id == result_id
+            ).first()
+
+            if not result:
+                raise ValueError(f"Conversion result {result_id} not found")
+
+            # Get the Lean code to verify (prefer answer_lean_code, fallback to question_lean_code)
+            lean_code = result.answer_lean_code or result.question_lean_code
+            if not lean_code:
+                raise ValueError(f"Conversion result {result_id} has no Lean code to verify")
+
+            # Mark as verifying
+            result.verification_status = 'verifying'
+            session.commit()
+        finally:
+            session.close()
+
+        try:
+            # Verify the code
+            verification_result = self._verify_code(lean_code)
+
+            # Determine overall status
+            if verification_result.has_errors:
+                verification_status = 'failed'
+            elif verification_result.has_warnings:
+                verification_status = 'warning'
+            else:
+                verification_status = 'passed'
+
+            # Update database with verification results
+            self.db.update_lean_verification(
+                result_id=result_id,
+                verification_status=verification_status,
+                has_errors=verification_result.has_errors,
+                has_warnings=verification_result.has_warnings,
+                messages=[m.__dict__ for m in verification_result.messages],
+                verification_time=verification_result.total_time
+            )
+
+            return {
+                'success': True,
+                'result_id': result_id,
+                'verification_status': verification_status,
+                'has_errors': verification_result.has_errors,
+                'has_warnings': verification_result.has_warnings,
+                'message_count': len(verification_result.messages),
+                'total_time': verification_result.total_time,
+                'messages': [m.__dict__ for m in verification_result.messages]
+            }
+
+        except Exception as e:
+            error_msg = str(e)
+            is_connection_error = self._is_connection_error(error_msg)
+
+            if is_connection_error:
+                verification_status = 'connection_error'
+            else:
+                verification_status = 'error'
+
+            # Update with error status
+            session = self.db.get_session()
+            try:
+                result = session.query(LeanConversionResult).filter(
+                    LeanConversionResult.id == result_id
+                ).first()
+                if result:
+                    result.verification_status = verification_status
+                    session.commit()
+            finally:
+                session.close()
+
+            if is_connection_error:
+                raise ConnectionError(f"Failed to connect to kimina-lean-server: {error_msg}")
+            else:
+                raise
+
     def _verify_code(self, lean_code: str) -> VerificationResult:
         """
         Verify Lean code using kimina-lean-server.
