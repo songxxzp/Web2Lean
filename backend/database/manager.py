@@ -881,6 +881,14 @@ class DatabaseManager:
                     'verification_has_warnings': r.verification_has_warnings,
                     'verification_messages': json.loads(r.verification_messages) if r.verification_messages else [],
                     'verification_time': r.verification_time,
+                    # Question-specific verification
+                    'question_verification_status': r.question_verification_status,
+                    'question_verification_messages': json.loads(r.question_verification_messages) if r.question_verification_messages else [],
+                    'question_verification_time': r.question_verification_time,
+                    # Answer-specific verification
+                    'answer_verification_status': r.answer_verification_status,
+                    'answer_verification_messages': json.loads(r.answer_verification_messages) if r.answer_verification_messages else [],
+                    'answer_verification_time': r.answer_verification_time,
                     'conversion_time': r.conversion_time,
                     'error_message': r.error_message,
                     'created_at': r.created_at
@@ -908,6 +916,52 @@ class DatabaseManager:
                     result.verification_messages = json.dumps(messages)
                 if verification_time is not None:
                     result.verification_time = verification_time
+
+                session.commit()
+                return True
+            return False
+        finally:
+            session.close()
+
+    def update_lean_question_verification(self, result_id: int, verification_status: str,
+                                         has_errors: bool = False, has_warnings: bool = False,
+                                         messages: list = None, verification_time: float = None):
+        """Update question-specific verification status."""
+        session = self.get_session()
+        try:
+            result = session.query(LeanConversionResult).filter(
+                LeanConversionResult.id == result_id
+            ).first()
+
+            if result:
+                result.question_verification_status = verification_status
+                if messages is not None:
+                    result.question_verification_messages = json.dumps(messages)
+                if verification_time is not None:
+                    result.question_verification_time = verification_time
+
+                session.commit()
+                return True
+            return False
+        finally:
+            session.close()
+
+    def update_lean_answer_verification(self, result_id: int, verification_status: str,
+                                       has_errors: bool = False, has_warnings: bool = False,
+                                       messages: list = None, verification_time: float = None):
+        """Update answer-specific verification status."""
+        session = self.get_session()
+        try:
+            result = session.query(LeanConversionResult).filter(
+                LeanConversionResult.id == result_id
+            ).first()
+
+            if result:
+                result.answer_verification_status = verification_status
+                if messages is not None:
+                    result.answer_verification_messages = json.dumps(messages)
+                if verification_time is not None:
+                    result.answer_verification_time = verification_time
 
                 session.commit()
                 return True

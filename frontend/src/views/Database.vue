@@ -295,29 +295,6 @@
               </div>
             </div>
 
-            <!-- Show verification status -->
-            <div v-if="getCurrentConversion() && getCurrentConversion().verification_status && getCurrentConversion().verification_status !== 'not_verified'" style="margin-bottom: 1rem;">
-              <el-alert
-                :type="getVerificationStatusType(getCurrentConversion().verification_status)"
-                :closable="false"
-              >
-                <template #title>
-                  <strong>Verification Status: {{ getCurrentConversion().verification_status }}</strong>
-                </template>
-                <div v-if="getCurrentConversion().verification_time" style="margin-top: 0.5rem;">
-                  Time: {{ getCurrentConversion().verification_time.toFixed(3) }}s
-                </div>
-                <!-- Show verification messages if any -->
-                <div v-if="getCurrentConversion().verification_messages && getCurrentConversion().verification_messages.length > 0" style="margin-top: 0.5rem;">
-                  <div v-for="(msg, idx) in getCurrentConversion().verification_messages" :key="idx" style="margin-top: 0.25rem;">
-                    <el-tag :type="msg.severity === 'error' ? 'danger' : msg.severity === 'warning' ? 'warning' : 'info'" size="small">
-                      Line {{ msg.line }}: {{ msg.message }}
-                    </el-tag>
-                  </div>
-                </div>
-              </el-alert>
-            </div>
-
             <!-- Show Lean conversion error first -->
             <div v-if="getCurrentConversion() && getCurrentConversion().error_message" style="margin-bottom: 1rem;">
               <el-alert type="error" :closable="false">
@@ -346,14 +323,48 @@
             <div v-if="getCurrentConversion() && (getCurrentConversion().question_lean_code || getCurrentConversion().answer_lean_code)">
               <!-- Question Lean Code (Theorem Declaration Only) -->
               <div v-if="getCurrentConversion().question_lean_code">
-                <h4>Question (Theorem Declaration)</h4>
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 0.5rem;">
+                  <h4 style="margin: 0;">Question (Theorem Declaration)</h4>
+                  <el-tag v-if="getCurrentConversion().question_verification_status"
+                    :type="getVerificationStatusType(getCurrentConversion().question_verification_status)"
+                    size="small">
+                    {{ getCurrentConversion().question_verification_status }}
+                  </el-tag>
+                </div>
+                <!-- Question verification messages -->
+                <div v-if="getCurrentConversion().question_verification_messages && getCurrentConversion().question_verification_messages.length > 0" style="margin-bottom: 0.5rem;">
+                  <el-alert :type="getVerificationStatusType(getCurrentConversion().question_verification_status)" :closable="false">
+                    <div v-for="(msg, idx) in getCurrentConversion().question_verification_messages" :key="idx" style="margin-top: 0.25rem;">
+                      <el-tag :type="msg.severity === 'error' ? 'danger' : msg.severity === 'warning' ? 'warning' : 'info'" size="small">
+                        Line {{ msg.line }}: {{ msg.message }}
+                      </el-tag>
+                    </div>
+                  </el-alert>
+                </div>
                 <pre class="code">{{ getCurrentConversion().question_lean_code }}</pre>
               </div>
 
               <!-- Answer Lean Code (Complete Theorem with Proof) -->
               <div v-if="getCurrentConversion().answer_lean_code">
                 <el-divider style="margin: 1.5rem 0;" />
-                <h4>Lean Theorem Statement (Complete with Proof)</h4>
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 0.5rem;">
+                  <h4 style="margin: 0;">Lean Theorem Statement (Complete with Proof)</h4>
+                  <el-tag v-if="getCurrentConversion().answer_verification_status"
+                    :type="getVerificationStatusType(getCurrentConversion().answer_verification_status)"
+                    size="small">
+                    {{ getCurrentConversion().answer_verification_status }}
+                  </el-tag>
+                </div>
+                <!-- Answer verification messages -->
+                <div v-if="getCurrentConversion().answer_verification_messages && getCurrentConversion().answer_verification_messages.length > 0" style="margin-bottom: 0.5rem;">
+                  <el-alert :type="getVerificationStatusType(getCurrentConversion().answer_verification_status)" :closable="false">
+                    <div v-for="(msg, idx) in getCurrentConversion().answer_verification_messages" :key="idx" style="margin-top: 0.25rem;">
+                      <el-tag :type="msg.severity === 'error' ? 'danger' : msg.severity === 'warning' ? 'warning' : 'info'" size="small">
+                        Line {{ msg.line }}: {{ msg.message }}
+                      </el-tag>
+                    </div>
+                  </el-alert>
+                </div>
                 <pre class="code">{{ getCurrentConversion().answer_lean_code }}</pre>
               </div>
             </div>

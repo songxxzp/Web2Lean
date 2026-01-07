@@ -220,11 +220,24 @@ class LeanConversionResult(Base):
     converter_version = Column(String(50))  # Version of the converter (e.g., GLM_AGENT_VERSION, KIMINA_VERSION)
     question_lean_code = Column(Text)  # Lean code for question (theorem/definition)
     answer_lean_code = Column(Text)  # Lean code for answer (proof)
+
+    # Overall verification status (based on both question and answer)
     verification_status = Column(Text)  # 'not_verified', 'verifying', 'passed', 'warning', 'failed', 'error'
     verification_has_errors = Column(Boolean, default=False)
     verification_has_warnings = Column(Boolean, default=False)
     verification_messages = Column(Text)  # JSON array of verification messages
-    verification_time = Column(Float)  # Verification time in seconds
+    verification_time = Column(Float)  # Total verification time in seconds
+
+    # Question-specific verification
+    question_verification_status = Column(Text)  # 'not_verified', 'verifying', 'passed', 'warning', 'failed', 'error'
+    question_verification_messages = Column(Text)  # JSON array of question verification messages
+    question_verification_time = Column(Float)  # Question verification time in seconds
+
+    # Answer-specific verification
+    answer_verification_status = Column(Text)  # 'not_verified', 'verifying', 'passed', 'warning', 'failed', 'error'
+    answer_verification_messages = Column(Text)  # JSON array of answer verification messages
+    answer_verification_time = Column(Float)  # Answer verification time in seconds
+
     conversion_time = Column(Float)  # Conversion time in seconds
     error_message = Column(Text)  # Error if conversion failed
     created_at = Column(Text, default=lambda: datetime.now().isoformat())

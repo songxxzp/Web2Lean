@@ -38,8 +38,12 @@ def clear_data():
                 ProcessingStatus.verification_time: None,
                 ProcessingStatus.verification_completed_at: None
             }, synchronize_session=False)
+
+            # Also clear lean_conversion_results
+            from backend.database.schema import LeanConversionResult
+            lc_count = session.query(LeanConversionResult).delete()
             session.commit()
-            return jsonify({'message': f'Cleared lean code from {count} questions'})
+            return jsonify({'message': f'Cleared lean code from {count} questions and {lc_count} conversion results'})
 
         elif stage == 'verification':
             # Clear all verification status but keep lean code
@@ -54,8 +58,28 @@ def clear_data():
                 ProcessingStatus.verification_time: None,
                 ProcessingStatus.verification_completed_at: None
             }, synchronize_session=False)
+
+            # Also clear verification status in lean_conversion_results
+            from backend.database.schema import LeanConversionResult
+            lc_count = session.query(LeanConversionResult).filter(
+                LeanConversionResult.verification_status.isnot(None)
+            ).update({
+                LeanConversionResult.verification_status: None,
+                LeanConversionResult.verification_has_errors: None,
+                LeanConversionResult.verification_has_warnings: None,
+                LeanConversionResult.verification_messages: None,
+                LeanConversionResult.verification_time: None,
+                # Question verification
+                LeanConversionResult.question_verification_status: None,
+                LeanConversionResult.question_verification_messages: None,
+                LeanConversionResult.question_verification_time: None,
+                # Answer verification
+                LeanConversionResult.answer_verification_status: None,
+                LeanConversionResult.answer_verification_messages: None,
+                LeanConversionResult.answer_verification_time: None
+            }, synchronize_session=False)
             session.commit()
-            return jsonify({'message': f'Cleared verification status from {count} questions'})
+            return jsonify({'message': f'Cleared verification status from {count} questions and {lc_count} conversion results'})
 
         elif stage == 'preprocess':
             # Clear preprocessed data by version(s)
@@ -206,8 +230,14 @@ def clear_question_stage(question_id: int):
                 ps.verification_completed_at = None
                 if ps.status == 'lean_converted':
                     ps.status = 'preprocessed'
+
+            # Also clear lean_conversion_results for this question
+            from backend.database.schema import LeanConversionResult
+            lc_count = session.query(LeanConversionResult).filter(
+                LeanConversionResult.question_id == question_id
+            ).delete()
             session.commit()
-            return jsonify({'message': 'Cleared lean code'})
+            return jsonify({'message': f'Cleared lean code and {lc_count} conversion results'})
 
         elif stage == 'preprocess':
             # Clear preprocessed data, lean code, verification status, and failed/cant_convert status
@@ -231,8 +261,14 @@ def clear_question_stage(question_id: int):
                 if ps.status in ['preprocessed', 'lean_converted', 'failed', 'cant_convert']:
                     ps.status = 'raw'
                 ps.current_stage = None
+
+            # Also clear lean_conversion_results for this question
+            from backend.database.schema import LeanConversionResult
+            lc_count = session.query(LeanConversionResult).filter(
+                LeanConversionResult.question_id == question_id
+            ).delete()
             session.commit()
-            return jsonify({'message': 'Cleared preprocessed data'})
+            return jsonify({'message': f'Cleared preprocessed data and {lc_count} conversion results'})
 
         elif stage == 'raw':
             # Delete entire question and related data
