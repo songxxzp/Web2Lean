@@ -186,29 +186,70 @@ class _AMMCrawlerInternal:
         """
         stats = {
             'questions_fetched': 0,
+            'questions_skipped': 0,  # Already in database
             'answers_fetched': 0,
             'images_fetched': 0,
+            'images_skipped': 0,  # Already in database
             'errors': []
         }
 
         try:
             # Get problems from main page
-            problems = self._get_problems_from_main_page(limit=self.config.max_problems)
-            print(f"Found {len(problems)} problems to crawl")
+            all_problems = self._get_problems_from_main_page(limit=self.config.max_problems * 2)
+            print(f"Found {len(all_problems)} problems on page")
 
-            for problem in problems:
+            # Filter out problems that already exist in database
+            session = self.db.get_session()
+            new_problems = []
+            skipped_problems = 0
+
+            try:
+                from ..database.schema import Question
+
+                for problem in all_problems:
+                    external_id = f"amm.problem.{problem['number']}"
+                    existing = session.query(Question).filter(
+                        Question.question_id == external_id
+                    ).first()
+
+                    if existing:
+                        skipped_problems += 1
+                    else:
+                        new_problems.append(problem)
+
+            finally:
+                session.close()
+
+            stats['questions_skipped'] = skipped_problems
+
+            if skipped_problems > 0:
+                print(f"  Skipped {skipped_problems} already existing problems")
+
+            if not new_problems:
+                print("  No new problems to crawl")
+                return stats
+
+            print(f"  Processing {len(new_problems)} new problems")
+
+            # Process only new problems
+            for problem in new_problems[:self.config.max_problems]:
                 try:
                     # Download problem image
                     if self.config.download_images:
                         image_data = self._download_problem_image(problem)
-                        if image_data:
-                            problem['image'] = image_data
+                        if not image_data:
+                            # Image download failed, skip this problem
+                            error_msg = f"Image download failed for problem {problem['number']}, skipping"
+                            print(f"    ✗ {error_msg}")
+                            stats['errors'].append(error_msg)
+                            continue
+
+                        problem['image'] = image_data
+                        stats['images_fetched'] += 1
 
                     # Save to database
                     self._save_to_database(problem)
                     stats['questions_fetched'] += 1
-                    if problem.get('image'):
-                        stats['images_fetched'] += 1
 
                     print(f"    ✓ Saved: Problem {problem['number']} - {problem['proposer']}")
 
