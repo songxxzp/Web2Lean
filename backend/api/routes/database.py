@@ -335,7 +335,7 @@ def get_question_detail(question_id: int):
         return jsonify({'error': 'Question not found'}), 404
 
     # Debug: print theorem_name
-    print(f"[DEBUG] Question {question_id} theorem_name: {question.get('processing_status', {}).get('theorem_name')}")
+    print(f"[DEBUG] Question {question_id} theorem_name: {(question.get('processing_status') or {}).get('theorem_name')}")
 
     return jsonify(question)
 

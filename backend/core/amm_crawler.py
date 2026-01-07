@@ -65,8 +65,8 @@ class AMMCrawlerAdapter(BaseCrawler):
             images_dir=config.get('images_dir', '/datadisk/Web2Lean/data/images/amm')
         )
 
-        # Create actual AMM crawler
-        self.amm_crawler = _AMMCrawlerInternal(amm_config, db_manager)
+        # Create actual AMM crawler with reference to adapter for state updates
+        self.amm_crawler = _AMMCrawlerInternal(amm_config, db_manager, self)
 
     def fetch_questions_page(self, page: int) -> List[Dict[str, Any]]:
         """Fetch questions (not used for AMM, but required by interface)."""
@@ -153,16 +153,18 @@ class AMMCrawlerAdapter(BaseCrawler):
 class _AMMCrawlerInternal:
     """Internal AMM crawler implementation."""
 
-    def __init__(self, config: AMMConfig, db_manager: DatabaseManager):
+    def __init__(self, config: AMMConfig, db_manager: DatabaseManager, adapter=None):
         """
         Initialize AMM crawler.
 
         Args:
             config: AMM crawler configuration
             db_manager: Database manager instance
+            adapter: Optional AMMCrawlerAdapter for real-time state updates
         """
         self.config = config
         self.db = db_manager
+        self.adapter = adapter  # For real-time state updates
         self.session = requests.Session()
         # Use realistic headers
         self.session.headers.update({
@@ -250,6 +252,11 @@ class _AMMCrawlerInternal:
                     # Save to database
                     self._save_to_database(problem)
                     stats['questions_fetched'] += 1
+
+                    # Update adapter state in real-time
+                    if self.adapter:
+                        self.adapter.state.questions_crawled = stats['questions_fetched']
+                        self.adapter.state.images_crawled = stats['images_fetched']
 
                     print(f"    ✓ Saved: Problem {problem['number']} - {problem['proposer']}")
 
@@ -396,6 +403,10 @@ class _AMMCrawlerInternal:
             if problem.get('image'):
                 body += f"\n\nImage: {problem['image']['url']}"
 
+            # Tags as JSON array
+            import json
+            tags_json = json.dumps(['AMM', 'Problems', 'Math'])
+
             if existing:
                 # Update existing
                 existing.title = title
@@ -411,7 +422,7 @@ class _AMMCrawlerInternal:
                     title=title,
                     body=body,
                     body_html=f"<p>{body}</p>",
-                    tags='AMM,Problems,Math',
+                    tags=tags_json,
                     score=0,
                     view_count=0,
                     answer_count=0,

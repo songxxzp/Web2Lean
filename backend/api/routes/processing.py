@@ -323,7 +323,7 @@ def get_processing_status(question_id: int):
     if not question:
         return jsonify({'error': 'Question not found'}), 404
 
-    return jsonify(question.get('processing_status', {}))
+    return jsonify(question.get('processing_status') or {})
 
 
 @processing_bp.route('/retry/<int:question_id>', methods=['POST', 'OPTIONS'])
@@ -338,7 +338,7 @@ def retry_processing(question_id: int):
     if not question:
         return jsonify({'error': 'Question not found'}), 404
 
-    status = question.get('processing_status', {})
+    status = question.get('processing_status') or {}
     if status.get('status') != 'failed':
         return jsonify({'error': 'Question is not in failed state'}), 400
 

@@ -22,7 +22,7 @@ def verify_lean_code(question_id: int):
     if not question:
         return jsonify({'error': 'Question not found'}), 404
 
-    status = question.get('processing_status', {}).get('status')
+    status = (question.get('processing_status') or {}).get('status')
     if status != 'lean_converted':
         return jsonify({'error': f'Question must be in lean_converted status (current: {status})'}), 400
 
@@ -166,7 +166,7 @@ def get_verification_status(question_id: int):
     if not question:
         return jsonify({'error': 'Question not found'}), 404
 
-    ps = question.get('processing_status', {})
+    ps = question.get('processing_status') or {}
 
     return jsonify({
         'verification_status': ps.get('verification_status', 'not_verified'),
