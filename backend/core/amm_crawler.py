@@ -16,8 +16,10 @@ import re
 from urllib.parse import urljoin, urlparse
 from pathlib import Path
 from datetime import datetime
+import threading
 
 from ..database import DatabaseManager, Question, Answer, Image
+from .base_crawler import BaseCrawler, CrawlerState, CrawlerStatus
 
 
 @dataclass
@@ -34,8 +36,122 @@ class AMMConfig:
     images_dir: str = "/datadisk/Web2Lean/data/images/amm"
 
 
-class AMMCrawler:
-    """Crawler for American Mathematical Monthly Problems from Roberto Tauraso's collection."""
+class AMMCrawlerAdapter(BaseCrawler):
+    """
+    Adapter to make AMMCrawler compatible with BaseCrawler interface.
+    This allows the AMM crawler to be used with the existing crawler API.
+    """
+
+    def __init__(
+        self,
+        site_name: str,
+        site_id: int,
+        config: Dict[str, Any],
+        db_manager: DatabaseManager
+    ):
+        """Initialize adapter with BaseCrawler interface."""
+        super().__init__(site_name, site_id, config, db_manager)
+
+        # Create AMM config
+        amm_config = AMMConfig(
+            base_url=config.get('base_url', AMMConfig.base_url),
+            main_page=config.get('main_page', AMMConfig.main_page),
+            enabled=config.get('enabled', True),
+            max_problems=config.get('max_problems', 10),
+            request_delay=config.get('request_delay', 2.0),
+            max_retries=config.get('max_retries', 3),
+            timeout=config.get('timeout', 30),
+            download_images=config.get('download_images', True),
+            images_dir=config.get('images_dir', '/datadisk/Web2Lean/data/images/amm')
+        )
+
+        # Create actual AMM crawler
+        self.amm_crawler = _AMMCrawlerInternal(amm_config, db_manager)
+
+    def fetch_questions_page(self, page: int) -> List[Dict[str, Any]]:
+        """Fetch questions (not used for AMM, but required by interface)."""
+        # AMM crawler doesn't use pages, but we need this for compatibility
+        return []
+
+    def parse_question(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Parse question (not used for AMM, but required by interface)."""
+        return raw_data
+
+    def fetch_answers(self, question_id: int) -> List[Dict[str, Any]]:
+        """Fetch answers (not used for AMM, but required by interface)."""
+        return []
+
+    def start(self, mode: str = 'incremental', **kwargs) -> str:
+        """
+        Start the crawler using AMM's internal crawl method.
+
+        Args:
+            mode: Crawl mode (ignored for AMM)
+            **kwargs: Additional parameters (ignored for AMM)
+
+        Returns:
+            Run ID
+        """
+        if self.state.status == CrawlerStatus.RUNNING:
+            raise RuntimeError(f"Crawler for {self.site_name} is already running")
+
+        if not self.enabled:
+            raise RuntimeError(f"Crawler for {self.site_name} is disabled")
+
+        # Reset state
+        self._stop_event.clear()
+        run_id = f"run_{self.site_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self.state.run_id = run_id
+        self.state.status = CrawlerStatus.RUNNING
+        self.state.start_time = datetime.now().isoformat()
+        self.state.questions_crawled = 0
+        self.state.answers_crawled = 0
+        self.state.images_crawled = 0
+        self.state.error_message = None
+
+        # Create run record
+        self.db.create_crawler_run(self.site_id, run_id, run_mode=mode)
+
+        try:
+            # Run the AMM crawl
+            stats = self.amm_crawler.crawl()
+
+            # Update state with results
+            self.state.questions_crawled = stats.get('questions_fetched', 0)
+            self.state.images_crawled = stats.get('images_fetched', 0)
+            self.state.status = CrawlerStatus.COMPLETED
+
+            # Update run record
+            self.db.update_crawler_run(
+                run_id,
+                status='completed',
+                questions_count=self.state.questions_crawled,
+                images_count=self.state.images_crawled
+            )
+
+        except Exception as e:
+            self.state.status = CrawlerStatus.ERROR
+            self.state.error_message = str(e)
+            self.db.update_crawler_run(run_id, status='failed', error_message=str(e))
+            raise
+
+        return run_id
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get current crawler status."""
+        return {
+            'site_name': self.site_name,
+            'status': self.state.status.value,
+            'run_id': self.state.run_id,
+            'questions_crawled': self.state.questions_crawled,
+            'images_crawled': self.state.images_crawled,
+            'start_time': self.state.start_time,
+            'error_message': self.state.error_message
+        }
+
+
+class _AMMCrawlerInternal:
+    """Internal AMM crawler implementation."""
 
     def __init__(self, config: AMMConfig, db_manager: DatabaseManager):
         """
@@ -162,7 +278,8 @@ class AMMCrawler:
             if img_src.startswith('http'):
                 img_url = img_src
             else:
-                img_url = f"{self.config.base_url}/{img_src}"
+                # Use urljoin to properly handle relative paths
+                img_url = urljoin(self.config.main_page, img_src)
 
             problems.append({
                 'number': problem_number,
