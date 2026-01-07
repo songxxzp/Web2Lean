@@ -281,3 +281,100 @@ def sanitize_theorem_name(name: str) -> str:
         name = "unnamed_theorem"
 
     return name
+
+
+# ============================================================================
+# Lean Conversion Prompts
+# ============================================================================
+
+# Prompt for converting a question to Lean 4 theorem declaration (without proof)
+LEAN_QUESTION_PROMPT = """You are an expert in Lean 4 formalization. Your task is to convert a mathematical problem statement into a Lean 4 theorem declaration.
+
+IMPORTANT REQUIREMENTS:
+1. Create a theorem DECLARATION only - end with ':= by sorry' (no proof needed)
+2. Use proper imports (e.g., import Mathlib)
+3. Define all necessary variables and hypotheses
+4. State the theorem clearly and precisely
+5. Do NOT provide any proof - use ':= by sorry' at the end
+
+Output format:
+```lean
+import Mathlib
+
+variable (α : Type*) [PartialOrder α]
+
+theorem theorem_name (h1 : hypothesis1) (h2 : hypothesis2) : conclusion := by
+  sorry
+```
+
+Convert this problem to Lean 4:
+
+{problem}
+"""
+
+
+# Prompt for converting a question + answer to complete Lean 4 theorem with proof
+LEAN_WITH_ANSWER_PROMPT = """You are an expert in Lean 4 formalization. Your task is to convert a mathematical problem AND its solution into a complete, verifiable Lean 4 theorem with proof.
+
+IMPORTANT REQUIREMENTS:
+1. Use proper imports from Mathlib
+2. Define all necessary variables, types, and hypotheses
+3. State the theorem precisely
+4. Provide a COMPLETE, RIGOROUS proof using Lean 4 tactics
+5. Ensure the proof is verifiable by Lean 4
+6. Use appropriate tactics (simp, rw, apply, exact, etc.)
+
+Common tactics to use:
+- `simp` for simplification
+- `rw` for rewriting
+- `apply` for applying lemmas
+- `exact` for exact terms
+- `linarith` for linear arithmetic
+- `norm_num` for numerical normalization
+- `aesop` for automated proofs
+- `by` tactic combinator
+
+Output format:
+```lean
+import Mathlib
+
+variable (α : Type*) [PartialOrder α]
+
+theorem theorem_name (h1 : hypothesis1) : conclusion := by
+  tactic1
+  tactic2
+  -- more tactics
+  exact final_result
+```
+
+Convert this problem AND solution to Lean 4:
+
+PROBLEM:
+{problem}
+
+SOLUTION:
+{answer}
+"""
+
+
+# Prompt for correcting Lean code based on verification errors
+LEAN_CORRECTION_PROMPT = """You are an expert in Lean 4 formalization. The Lean verifier found errors in your previous attempt.
+
+IMPORTANT: Fix the errors based on the feedback below. Keep what works and fix only what doesn't.
+
+Previous Lean code:
+```lean
+{previous_lean}
+```
+
+Errors from Lean verifier:
+{error_message}
+
+Your task:
+1. Analyze each error carefully
+2. Fix ONLY the problematic parts
+3. Maintain the overall structure
+4. Ensure the corrected code compiles in Lean 4
+
+Provide the complete corrected Lean 4 code:"""
+

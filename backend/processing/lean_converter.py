@@ -16,6 +16,12 @@ import logging
 
 from ..database import DatabaseManager
 from ..utils import VLLMClient, ZhipuClient
+from ..utils.prompts import (
+    LEAN_QUESTION_PROMPT,
+    LEAN_WITH_ANSWER_PROMPT,
+    LEAN_CORRECTION_PROMPT,
+    sanitize_theorem_name
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +35,7 @@ class LeanConverter:
         vllm_base_url: str = "http://localhost:8000/v1",
         model_path: str = "/root/Kimina-Autoformalizer-7B",
         converter_name: str = "Kimina-Legacy"
+        # TODO: add max_tokens
     ):
         """
         Initialize Lean converter.
@@ -74,9 +81,6 @@ class LeanConverter:
         )
 
         try:
-            # Import sanitize function
-            from ..utils.prompts import sanitize_theorem_name
-
             # Use preprocessed content if available
             body = status.get('preprocessed_body') or question['body']
             answer = status.get('preprocessed_answer')
@@ -123,28 +127,18 @@ class LeanConverter:
             }
 
         except Exception as e:
-            # Determine if this is a program error
+            # Log error but don't change status - record in lean_error field only
             error_msg = str(e)
-            is_program_error = self._is_program_error(error_msg)
+            logger.error(f"Lean conversion error for question {question_internal_id}: {error_msg}")
 
-            if is_program_error:
-                # Program error - mark as failed (can retry)
-                self.db.update_processing_status(
-                    question_internal_id,
-                    status='failed',
-                    lean_error=f"Lean conversion program error: {error_msg}",
-                    processing_completed_at=self._now()
-                )
-                raise
-            else:
-                # Other error - also mark as failed but with different message
-                self.db.update_processing_status(
-                    question_internal_id,
-                    status='failed',
-                    lean_error=f"Lean conversion error: {error_msg}",
-                    processing_completed_at=self._now()
-                )
-                raise
+            # Keep status as 'preprocessed', just record the error
+            # This allows users to see the error in the UI without marking the question as failed
+            self.db.update_processing_status(
+                question_internal_id,
+                lean_error=f"Lean conversion error: {error_msg}",
+                processing_completed_at=self._now()
+            )
+            raise
 
     def _convert_question_to_lean(self, title: str, body: str) -> str:
         """
@@ -392,93 +386,6 @@ class LeanConverter:
 class LLMLeanConverter:
     """Convert mathematical problems to Lean 4 using GLM LLM with iterative correction."""
 
-    # Prompts for Lean conversion
-    QUESTION_ONLY_PROMPT = """You are an expert in Lean 4 formalization. Your task is to convert a mathematical problem statement into a Lean 4 theorem declaration.
-
-IMPORTANT REQUIREMENTS:
-1. Create a theorem DECLARATION only - end with ':= by sorry' (no proof needed)
-2. Use proper imports (e.g., import Mathlib)
-3. Define all necessary variables and hypotheses
-4. State the theorem clearly and precisely
-5. Do NOT provide any proof - use ':= by sorry' at the end
-
-Output format:
-```lean
-import Mathlib
-
-variable (α : Type*} [PartialOrder α]
-
-theorem theorem_name (h1 : hypothesis1) (h2 : hypothesis2) : conclusion := by
-  sorry
-```
-
-Convert this problem to Lean 4:
-
-{problem}
-"""
-
-    QUESTION_WITH_ANSWER_PROMPT = """You are an expert in Lean 4 formalization. Your task is to convert a mathematical problem AND its solution into a complete, verifiable Lean 4 theorem with proof.
-
-IMPORTANT REQUIREMENTS:
-1. Use proper imports from Mathlib
-2. Define all necessary variables, types, and hypotheses
-3. State the theorem precisely
-4. Provide a COMPLETE, RIGOROUS proof using Lean 4 tactics
-5. Ensure the proof is verifiable by Lean 4
-6. Use appropriate tactics (simp, rw, apply, exact, etc.)
-
-Common tactics to use:
-- `simp` for simplification
-- `rw` for rewriting
-- `apply` for applying lemmas
-- `exact` for exact terms
-- `linarith` for linear arithmetic
-- `norm_num` for numerical normalization
-- `aesop` for automated proofs
-- `by` tactic combinator
-
-Output format:
-```lean
-import Mathlib
-
-variable (α : Type*} [PartialOrder α]
-
-theorem theorem_name (h1 : hypothesis1) : conclusion := by
-  tactic1
-  tactic2
-  -- more tactics
-  exact final_result
-```
-
-Convert this problem AND solution to Lean 4:
-
-PROBLEM:
-{problem}
-
-SOLUTION:
-{answer}
-"""
-
-    CORRECTION_PROMPT = """You are an expert in Lean 4 formalization. The Lean verifier found errors in your previous attempt. 
-
-IMPORTANT: Fix the errors based on the feedback below. Keep what works and fix only what doesn't.
-
-Previous Lean code:
-```lean
-{previous_lean}
-```
-
-Errors from Lean verifier:
-{error_message}
-
-Your task:
-1. Analyze each error carefully
-2. Fix ONLY the problematic parts
-3. Maintain the overall structure
-4. Ensure the corrected code compiles in Lean 4
-
-Provide the complete corrected Lean 4 code:"""
-
     def __init__(
         self,
         db_manager: DatabaseManager,
@@ -487,7 +394,7 @@ Provide the complete corrected Lean 4 code:"""
         kimina_url: str = "http://127.0.0.1:9000",
         max_iterations: int = 1,
         temperature: float = 0.2,
-        max_tokens: int = 4096,
+        max_tokens: int = 16000,
         converter_name: str = None
     ):
         """
@@ -543,20 +450,19 @@ Provide the complete corrected Lean 4 code:"""
         )
 
         try:
-            from ..utils.prompts import sanitize_theorem_name
-
             # Use preprocessed content if available
             body = status.get('preprocessed_body') or question['body']
             answer = status.get('preprocessed_answer')
             theorem_name = status.get('theorem_name') or sanitize_theorem_name(question['title'])
 
             # Convert question to Lean (with sorry)
-            question_lean = self._convert_with_correction(
+            question_result = self._convert_with_correction(
                 theorem_name=theorem_name,
                 body=body,
                 answer=None,
                 lean_type="question"
             )
+            question_lean = question_result['lean_code']
 
             # Convert answer to Lean if available
             answer_lean = None
@@ -616,25 +522,14 @@ Provide the complete corrected Lean 4 code:"""
             error_msg = str(e)
             logger.error(f"LLM Lean conversion error for question {question_internal_id}: {error_msg}")
 
-            # Determine error type
-            is_program_error = self._is_program_error(error_msg)
-
-            if is_program_error:
-                self.db.update_processing_status(
-                    question_internal_id,
-                    status='failed',
-                    lean_error=f"LLM Lean conversion program error: {error_msg}",
-                    processing_completed_at=self._now()
-                )
-                raise
-            else:
-                self.db.update_processing_status(
-                    question_internal_id,
-                    status='failed',
-                    lean_error=f"LLM Lean conversion error: {error_msg}",
-                    processing_completed_at=self._now()
-                )
-                raise
+            # Don't change status to 'failed' - just record error in lean_error field
+            # Keep status as 'preprocessed' so the question remains usable
+            self.db.update_processing_status(
+                question_internal_id,
+                lean_error=f"LLM Lean conversion error: {error_msg}",
+                processing_completed_at=self._now()
+            )
+            raise
 
     def _convert_with_correction(
         self,
@@ -657,9 +552,9 @@ Provide the complete corrected Lean 4 code:"""
         """
         # Generate initial Lean code
         if lean_type == "question" or answer is None:
-            prompt = self.QUESTION_ONLY_PROMPT.replace('{problem}', body)
+            prompt = LEAN_QUESTION_PROMPT.replace('{problem}', body)
         else:
-            prompt = self.QUESTION_WITH_ANSWER_PROMPT.replace('{problem}', body).replace('{answer}', answer)
+            prompt = LEAN_WITH_ANSWER_PROMPT.replace('{problem}', body).replace('{answer}', answer)
 
         prompt += f"\n\nUse the theorem name: {theorem_name}"
 
@@ -683,7 +578,7 @@ Provide the complete corrected Lean 4 code:"""
 
             # Generate correction prompt
             error_message = self._format_error_message(verification.get('messages', []))
-            correction_prompt = self.CORRECTION_PROMPT.replace('{previous_lean}', current_lean).replace('{error_message}', error_message)
+            correction_prompt = LEAN_CORRECTION_PROMPT.replace('{previous_lean}', current_lean).replace('{error_message}', error_message)
 
             # Get corrected code
             try:
@@ -735,25 +630,56 @@ Provide the complete corrected Lean 4 code:"""
         Returns:
             Verification result dict
         """
-        import requests
-        import json
-
         try:
-            response = requests.post(
-                f"{self.kimina_url}/verify",
-                json={"code": lean_code},
-                timeout=30
-            )
-            response.raise_for_status()
+            from kimina_client import KiminaClient
 
-            result = response.json()
+            client = KiminaClient(api_url=self.kimina_url)
+            response = client.check(lean_code, show_progress=False)
 
-            # Parse result
-            status = result.get('status', 'error')
-            messages = result.get('messages', [])
-            has_errors = result.get('has_errors', False)
-            has_warnings = result.get('has_warnings', False)
-            verification_time = result.get('time', 0.0)
+            # Parse KiminaClient response
+            # env: nevermind
+            # messages_raw: nevermind if not exist(Passed).
+            # severity - info, warning: passed with minor issue.
+            # severity - error: not passed.
+            if not response.results or len(response.results) == 0:
+                return {
+                    'status': 'error',
+                    'messages': [{'severity': 'error', 'line': 0, 'message': 'No response from verifier'}],
+                    'has_errors': True,
+                    'has_warnings': False,
+                    'time': 0.0
+                }
+
+            result = response.results[0]
+            resp_data = result.response
+            # env = resp_data.get('env', 0)
+            messages_raw = resp_data.get('messages', [])
+            verification_time = result.time
+
+            # Map env to status
+            if len(messages_raw) == 0:  # Passed
+                status = 'passed'
+                has_errors = False
+                has_warnings = False
+            else:
+                # Unknown env value, check messages
+                has_errors = any(msg.get('severity') == 'error' for msg in messages_raw)
+                has_warnings = any(msg.get('severity') == 'warning' for msg in messages_raw)
+                status = 'error' if has_errors else ('warning' if has_warnings else 'passed')
+
+            # Parse messages into our format
+            messages = []
+            for msg in messages_raw:
+                severity = msg.get('severity', 'error')
+                pos = msg.get('pos', {})
+                line = pos.get('line', 0)
+                message_text = msg.get('data', 'Unknown error')
+
+                messages.append({
+                    'severity': severity,
+                    'line': line,
+                    'message': message_text
+                })
 
             return {
                 'status': status,
@@ -763,11 +689,11 @@ Provide the complete corrected Lean 4 code:"""
                 'time': verification_time
             }
 
-        except requests.RequestException as e:
-            logger.warning(f"Lean verification request failed: {e}")
+        except ImportError:
+            logger.error("kimina_client not installed. Install with: pip install kimina-client")
             return {
-                'status': 'connection_error',
-                'messages': [{'severity': 'error', 'line': 0, 'message': f'Verification server error: {str(e)}'}],
+                'status': 'error',
+                'messages': [{'severity': 'error', 'line': 0, 'message': 'kimina_client not installed'}],
                 'has_errors': True,
                 'has_warnings': False,
                 'time': 0.0

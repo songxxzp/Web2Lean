@@ -11,6 +11,7 @@ from .processing import processing_bp
 from .database import database_bp
 from .config import config_bp
 from .verification import verification_bp
+from .scheduler import scheduler_bp
 
 __all__ = [
     'crawlers_bp',
@@ -18,5 +19,6 @@ __all__ = [
     'processing_bp',
     'database_bp',
     'config_bp',
-    'verification_bp'
+    'verification_bp',
+    'scheduler_bp'
 ]

@@ -1,4 +1,4 @@
-from .schema import Base, Site, Question, Answer, Image, ProcessingStatus, CrawlerRun, ScheduledTask
+from .schema import Base, Site, Question, Answer, Image, ProcessingStatus, CrawlerRun, ScheduledTask, LeanConversionResult
 from .manager import DatabaseManager
 
 __all__ = [
@@ -10,5 +10,6 @@ __all__ = [
     'ProcessingStatus',
     'CrawlerRun',
     'ScheduledTask',
+    'LeanConversionResult',
     'DatabaseManager',
 ]

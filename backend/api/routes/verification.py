@@ -22,7 +22,7 @@ def verify_lean_code(question_id: int):
     if not question:
         return jsonify({'error': 'Question not found'}), 404
 
-    status = question.get('processing_status', {}).get('status')
+    status = (question.get('processing_status') or {}).get('status')
     if status != 'lean_converted':
         return jsonify({'error': f'Question must be in lean_converted status (current: {status})'}), 400
 
@@ -51,26 +51,35 @@ def verify_lean_code(question_id: int):
 
 @verification_bp.route('/verify-all', methods=['POST', 'OPTIONS'])
 def verify_all_lean():
-    """Verify all questions with Lean code."""
+    """Verify all Lean conversion results that haven't been verified yet."""
     if request.method == 'OPTIONS':
         return '', 200
 
-    from ...processing import LeanVerifier, TaskManager
+    from ...processing import TaskManager
+    from ...database import DatabaseManager, LeanConversionResult
 
     db = current_app.config['db']
     data = request.get_json() or {}
     limit = data.get('limit', 100)
     async_mode = data.get('async', False)
 
-    # Get all questions with lean_converted status
-    questions_data = db.list_questions(
-        status='lean_converted',
-        limit=limit
-    )
-    questions = questions_data.get('questions', [])
+    # Get all unverified lean conversion results
+    session = db.get_session()
+    try:
+        query = session.query(LeanConversionResult).filter(
+            LeanConversionResult.verification_status == None
+        ).order_by(LeanConversionResult.id)
 
-    if not questions:
-        return jsonify({'message': 'No questions ready for verification'})
+        if limit > 0:
+            query = query.limit(limit)
+
+        results = query.all()
+        conversion_results = [{'id': r.id, 'question_id': r.question_id, 'converter_name': r.converter_name} for r in results]
+    finally:
+        session.close()
+
+    if not conversion_results:
+        return jsonify({'message': 'No Lean conversion results ready for verification'})
 
     # Check if there's an active task
     task_manager = TaskManager()
@@ -83,17 +92,19 @@ def verify_all_lean():
         }), 400
 
     # Create task
-    task = task_manager.create_task('verification', len(questions))
+    task = task_manager.create_task('verification', len(conversion_results))
 
     # Import verifier
     try:
+        from ...processing.lean_verifier import LeanVerifier
+
         verifier = LeanVerifier(
             db_manager=db,
             kimina_url=current_app.config['settings'].kimina_url
         )
 
-        def process_questions():
-            for q in questions:
+        def process_results():
+            for result_info in conversion_results:
                 # Check if task is paused
                 task.wait_if_paused()
 
@@ -101,12 +112,15 @@ def verify_all_lean():
                 if task.is_stopped():
                     break
 
-                task.current_question_id = q['id']
+                result_id = result_info['id']
+                task.current_question_id = result_info['question_id']
                 try:
-                    verifier.verify_question(q['id'])
+                    verifier.verify_conversion_result(result_id)
                     task.increment_progress(success=True)
                 except Exception as e:
-                    print(f"Error verifying question {q['id']}: {e}")
+                    print(f"Error verifying conversion result {result_id}: {e}")
+                    import traceback
+                    traceback.print_exc()
                     task.increment_progress(success=False)
 
             # Mark task as completed
@@ -115,19 +129,19 @@ def verify_all_lean():
             task.current_question_id = None
 
         if async_mode:
-            thread = threading.Thread(target=process_questions, daemon=True)
+            thread = threading.Thread(target=process_results, daemon=True)
             thread.start()
 
             return jsonify({
-                'message': f'Verification task started for {len(questions)} questions',
+                'message': f'Verification task started for {len(conversion_results)} conversion results',
                 'task_id': task.task_id,
                 'progress': task.get_progress()
             })
         else:
             # Synchronous verification
-            process_questions()
+            process_results()
             return jsonify({
-                'message': f'Verification completed for {len(questions)} questions',
+                'message': f'Verification completed for {len(conversion_results)} conversion results',
                 'task_id': task.task_id,
                 'progress': task.get_progress()
             })
@@ -135,6 +149,8 @@ def verify_all_lean():
     except Exception as e:
         task.status = 'error'
         task.error_message = str(e)
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 
@@ -150,7 +166,7 @@ def get_verification_status(question_id: int):
     if not question:
         return jsonify({'error': 'Question not found'}), 404
 
-    ps = question.get('processing_status', {})
+    ps = question.get('processing_status') or {}
 
     return jsonify({
         'verification_status': ps.get('verification_status', 'not_verified'),

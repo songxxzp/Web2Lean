@@ -65,7 +65,7 @@ def start_lean_conversion():
                 kimina_url=settings.kimina_url,
                 max_iterations=settings.lean_max_iterations,
                 temperature=0.2,
-                max_tokens=4096,
+                max_tokens=settings.lean_conversion_max_tokens,
                 converter_name=converter_name  # Pass converter name
             )
         else:
@@ -323,7 +323,7 @@ def get_processing_status(question_id: int):
     if not question:
         return jsonify({'error': 'Question not found'}), 404
 
-    return jsonify(question.get('processing_status', {}))
+    return jsonify(question.get('processing_status') or {})
 
 
 @processing_bp.route('/retry/<int:question_id>', methods=['POST', 'OPTIONS'])
@@ -338,7 +338,7 @@ def retry_processing(question_id: int):
     if not question:
         return jsonify({'error': 'Question not found'}), 404
 
-    status = question.get('processing_status', {})
+    status = question.get('processing_status') or {}
     if status.get('status') != 'failed':
         return jsonify({'error': 'Question is not in failed state'}), 400
 

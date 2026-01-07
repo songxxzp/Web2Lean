@@ -808,8 +808,18 @@ class DatabaseManager:
     def save_lean_conversion_result(self, question_id: int, converter_name: str,
                                    converter_type: str, question_lean_code: str = None,
                                    answer_lean_code: str = None, conversion_time: float = None,
-                                   error_message: str = None) -> LeanConversionResult:
+                                   error_message: str = None, converter_version: str = None) -> LeanConversionResult:
         """Save or update a Lean conversion result from a specific converter."""
+        # Auto-detect converter version if not provided
+        if converter_version is None:
+            from ..version import GLM_AGENT_VERSION, KIMINA_VERSION
+            if converter_name.startswith('glm') or converter_name.startswith('api_llm'):
+                converter_version = GLM_AGENT_VERSION
+            elif converter_name.startswith('kimina') or converter_name.startswith('local_model'):
+                converter_version = KIMINA_VERSION
+            else:
+                converter_version = "unknown"
+
         session = self.get_session()
         try:
             # Check if result already exists for this converter
@@ -828,12 +838,15 @@ class DatabaseManager:
                     result.conversion_time = conversion_time
                 if error_message is not None:
                     result.error_message = error_message
+                # Always update version when updating
+                result.converter_version = converter_version
             else:
                 # Create new result
                 result = LeanConversionResult(
                     question_id=question_id,
                     converter_name=converter_name,
                     converter_type=converter_type,
+                    converter_version=converter_version,
                     question_lean_code=question_lean_code,
                     answer_lean_code=answer_lean_code,
                     conversion_time=conversion_time,
@@ -860,6 +873,7 @@ class DatabaseManager:
                     'id': r.id,
                     'converter_name': r.converter_name,
                     'converter_type': r.converter_type,
+                    'converter_version': r.converter_version,
                     'question_lean_code': r.question_lean_code,
                     'answer_lean_code': r.answer_lean_code,
                     'verification_status': r.verification_status,
@@ -867,6 +881,14 @@ class DatabaseManager:
                     'verification_has_warnings': r.verification_has_warnings,
                     'verification_messages': json.loads(r.verification_messages) if r.verification_messages else [],
                     'verification_time': r.verification_time,
+                    # Question-specific verification
+                    'question_verification_status': r.question_verification_status,
+                    'question_verification_messages': json.loads(r.question_verification_messages) if r.question_verification_messages else [],
+                    'question_verification_time': r.question_verification_time,
+                    # Answer-specific verification
+                    'answer_verification_status': r.answer_verification_status,
+                    'answer_verification_messages': json.loads(r.answer_verification_messages) if r.answer_verification_messages else [],
+                    'answer_verification_time': r.answer_verification_time,
                     'conversion_time': r.conversion_time,
                     'error_message': r.error_message,
                     'created_at': r.created_at
@@ -901,30 +923,95 @@ class DatabaseManager:
         finally:
             session.close()
 
+    def update_lean_question_verification(self, result_id: int, verification_status: str,
+                                         has_errors: bool = False, has_warnings: bool = False,
+                                         messages: list = None, verification_time: float = None):
+        """Update question-specific verification status."""
+        session = self.get_session()
+        try:
+            result = session.query(LeanConversionResult).filter(
+                LeanConversionResult.id == result_id
+            ).first()
+
+            if result:
+                result.question_verification_status = verification_status
+                if messages is not None:
+                    result.question_verification_messages = json.dumps(messages)
+                if verification_time is not None:
+                    result.question_verification_time = verification_time
+
+                session.commit()
+                return True
+            return False
+        finally:
+            session.close()
+
+    def update_lean_answer_verification(self, result_id: int, verification_status: str,
+                                       has_errors: bool = False, has_warnings: bool = False,
+                                       messages: list = None, verification_time: float = None):
+        """Update answer-specific verification status."""
+        session = self.get_session()
+        try:
+            result = session.query(LeanConversionResult).filter(
+                LeanConversionResult.id == result_id
+            ).first()
+
+            if result:
+                result.answer_verification_status = verification_status
+                if messages is not None:
+                    result.answer_verification_messages = json.dumps(messages)
+                if verification_time is not None:
+                    result.answer_verification_time = verification_time
+
+                session.commit()
+                return True
+            return False
+        finally:
+            session.close()
+
     def get_available_converters(self) -> List[Dict[str, Any]]:
-        """Get list of all available converters with counts."""
+        """Get list of all available converters with counts and versions."""
         session = self.get_session()
         try:
             from sqlalchemy import distinct
 
-            # Get unique converter names and types
+            # Get unique converter names, types, versions and counts
             converters = session.query(
                 LeanConversionResult.converter_name,
                 LeanConversionResult.converter_type,
+                LeanConversionResult.converter_version,
                 func.count(LeanConversionResult.id).label('count')
             ).group_by(
                 LeanConversionResult.converter_name,
-                LeanConversionResult.converter_type
+                LeanConversionResult.converter_type,
+                LeanConversionResult.converter_version
             ).all()
 
-            result = [
-                {
+            # Group by converter_name and combine versions
+            from collections import defaultdict
+            converter_data = defaultdict(lambda: {
+                'converter_type': None,
+                'versions': [],
+                'total_count': 0
+            })
+
+            for name, conv_type, version, count in converters:
+                converter_data[name]['converter_type'] = conv_type
+                converter_data[name]['versions'].append(version)
+                converter_data[name]['total_count'] += count
+
+            result = []
+            for name, data in converter_data.items():
+                # Use the most recent version (assuming versions are sortable)
+                versions = sorted([v for v in data['versions'] if v], reverse=True)
+                display_version = versions[0] if versions else None
+
+                result.append({
                     'converter_name': name,
-                    'converter_type': conv_type,
-                    'count': count
-                }
-                for name, conv_type, count in converters
-            ]
+                    'converter_type': data['converter_type'],
+                    'converter_version': display_version,
+                    'count': data['total_count']
+                })
 
             # Check for legacy lean data in processing_status
             legacy_count = session.query(ProcessingStatus).filter(
@@ -937,9 +1024,66 @@ class DatabaseManager:
                 result.append({
                     'converter_name': 'legacy',
                     'converter_type': 'legacy',
+                    'converter_version': None,
                     'count': legacy_count
                 })
 
             return result
+        finally:
+            session.close()
+
+    def get_questions_not_converted_by(self, converter_name: str, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get preprocessed questions that haven't been converted by a specific converter."""
+        session = self.get_session()
+        try:
+            # Get preprocessed question IDs
+            preprocessed_ids = session.query(ProcessingStatus.question_id).filter(
+                ProcessingStatus.status == 'preprocessed'
+            ).subquery()
+
+            # Get question IDs already converted by this converter
+            converted_ids = session.query(LeanConversionResult.question_id).filter(
+                LeanConversionResult.converter_name == converter_name
+            ).subquery()
+
+            # Find preprocessed questions not converted by this converter
+            results = session.query(Question).filter(
+                Question.id.in_(preprocessed_ids),
+                ~Question.id.in_(converted_ids)
+            ).limit(limit).all()
+
+            return [
+                {
+                    'id': q.id,
+                    'title': q.title
+                }
+                for q in results
+            ]
+        finally:
+            session.close()
+
+    def get_unverified_conversions(self, converter_name: str = None, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get Lean conversions that haven't been verified yet."""
+        session = self.get_session()
+        try:
+            query = session.query(LeanConversionResult).filter(
+                LeanConversionResult.verification_status.in_(
+                    ['not_verified', None]
+                )
+            )
+
+            if converter_name:
+                query = query.filter(LeanConversionResult.converter_name == converter_name)
+
+            results = query.limit(limit).all()
+
+            return [
+                {
+                    'id': r.id,
+                    'question_id': r.question_id,
+                    'converter_name': r.converter_name
+                }
+                for r in results
+            ]
         finally:
             session.close()

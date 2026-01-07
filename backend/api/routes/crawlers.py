@@ -15,6 +15,7 @@ CRAWLER_CLASSES = {
     'math_se': '...core.math_se_crawler.MathSECrawler',
     'mathoverflow': '...core.stackexchange_crawler.MathOverflowCrawler',
     'math_stackexchange': '...core.stackexchange_crawler.MathSECrawler',
+    'amm': '...core.amm_crawler.AMMCrawlerAdapter',
 }
 
 
@@ -35,6 +36,9 @@ def get_crawler_class(site_type):
     elif site_type in ('math_se', 'math_stackexchange'):
         from ...core.stackexchange_crawler import MathSECrawler
         return MathSECrawler
+    elif site_type == 'amm':
+        from ...core.amm_crawler import AMMCrawlerAdapter
+        return AMMCrawlerAdapter
     else:
         raise ValueError(f"No crawler implemented for site type: {site_type}")
 

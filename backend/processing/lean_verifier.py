@@ -212,6 +212,169 @@ class LeanVerifier:
             else:
                 raise
 
+    def verify_conversion_result(self, result_id: int) -> Dict[str, Any]:
+        """
+        Verify Lean code for a specific conversion result.
+
+        Verifies question_lean_code and answer_lean_code separately if both exist.
+        Overall status is 'passed' only if both question and answer pass.
+
+        Args:
+            result_id: Lean conversion result ID
+
+        Returns:
+            Verification result with separate question/answer statuses
+        """
+        from ..database import LeanConversionResult
+
+        # Get conversion result
+        session = self.db.get_session()
+        try:
+            result = session.query(LeanConversionResult).filter(
+                LeanConversionResult.id == result_id
+            ).first()
+
+            if not result:
+                raise ValueError(f"Conversion result {result_id} not found")
+
+            question_code = result.question_lean_code
+            answer_code = result.answer_lean_code
+
+            if not question_code and not answer_code:
+                raise ValueError(f"Conversion result {result_id} has no Lean code to verify")
+
+            # Mark as verifying
+            result.verification_status = 'verifying'
+            result.question_verification_status = 'verifying' if question_code else None
+            result.answer_verification_status = 'verifying' if answer_code else None
+            session.commit()
+        finally:
+            session.close()
+
+        try:
+            question_result = None
+            answer_result = None
+            total_time = 0
+
+            # Verify question code if exists
+            if question_code:
+                logger.info(f"Verifying question code for result {result_id}")
+                question_result = self._verify_code(question_code)
+                total_time += question_result.total_time
+
+            # Verify answer code if exists
+            if answer_code:
+                logger.info(f"Verifying answer code for result {result_id}")
+                answer_result = self._verify_code(answer_code)
+                total_time += answer_result.total_time
+
+            # Determine overall status based on both results
+            # Overall status is:
+            # - 'passed' if both question and answer passed (or only one exists and it passed)
+            # - 'failed' if either has errors
+            # - 'warning' if no errors but at least one has warnings
+            has_errors = (question_result and question_result.has_errors) or (answer_result and answer_result.has_errors)
+            has_warnings = (question_result and question_result.has_warnings) or (answer_result and answer_result.has_warnings)
+
+            if has_errors:
+                overall_status = 'failed'
+            elif has_warnings:
+                overall_status = 'warning'
+            else:
+                overall_status = 'passed'
+
+            # Collect all messages
+            all_messages = []
+            if question_result and question_result.messages:
+                all_messages.extend([m.__dict__ for m in question_result.messages])
+            if answer_result and answer_result.messages:
+                all_messages.extend([m.__dict__ for m in answer_result.messages])
+
+            # Update database with overall verification results
+            self.db.update_lean_verification(
+                result_id=result_id,
+                verification_status=overall_status,
+                has_errors=has_errors,
+                has_warnings=has_warnings,
+                messages=all_messages,
+                verification_time=total_time
+            )
+
+            # Update question-specific verification
+            if question_code and question_result:
+                q_status = 'failed' if question_result.has_errors else ('warning' if question_result.has_warnings else 'passed')
+                self.db.update_lean_question_verification(
+                    result_id=result_id,
+                    verification_status=q_status,
+                    has_errors=question_result.has_errors,
+                    has_warnings=question_result.has_warnings,
+                    messages=[m.__dict__ for m in question_result.messages],
+                    verification_time=question_result.total_time
+                )
+
+            # Update answer-specific verification
+            if answer_code and answer_result:
+                a_status = 'failed' if answer_result.has_errors else ('warning' if answer_result.has_warnings else 'passed')
+                self.db.update_lean_answer_verification(
+                    result_id=result_id,
+                    verification_status=a_status,
+                    has_errors=answer_result.has_errors,
+                    has_warnings=answer_result.has_warnings,
+                    messages=[m.__dict__ for m in answer_result.messages],
+                    verification_time=answer_result.total_time
+                )
+
+            return {
+                'success': True,
+                'result_id': result_id,
+                'verification_status': overall_status,
+                'has_errors': has_errors,
+                'has_warnings': has_warnings,
+                'message_count': len(all_messages),
+                'total_time': total_time,
+                'messages': all_messages,
+                'question_verification': {
+                    'status': question_result and ('failed' if question_result.has_errors else ('warning' if question_result.has_warnings else 'passed')),
+                    'has_errors': question_result.has_errors if question_result else False,
+                    'has_warnings': question_result.has_warnings if question_result else False,
+                    'messages': [m.__dict__ for m in question_result.messages] if question_result else [],
+                    'time': question_result.total_time if question_result else 0
+                } if question_code else None,
+                'answer_verification': {
+                    'status': answer_result and ('failed' if answer_result.has_errors else ('warning' if answer_result.has_warnings else 'passed')),
+                    'has_errors': answer_result.has_errors if answer_result else False,
+                    'has_warnings': answer_result.has_warnings if answer_result else False,
+                    'messages': [m.__dict__ for m in answer_result.messages] if answer_result else [],
+                    'time': answer_result.total_time if answer_result else 0
+                } if answer_code else None
+            }
+
+        except Exception as e:
+            error_msg = str(e)
+            is_connection_error = self._is_connection_error(error_msg)
+
+            if is_connection_error:
+                verification_status = 'connection_error'
+            else:
+                verification_status = 'error'
+
+            # Update with error status
+            session = self.db.get_session()
+            try:
+                result = session.query(LeanConversionResult).filter(
+                    LeanConversionResult.id == result_id
+                ).first()
+                if result:
+                    result.verification_status = verification_status
+                    session.commit()
+            finally:
+                session.close()
+
+            if is_connection_error:
+                raise ConnectionError(f"Failed to connect to kimina-lean-server: {error_msg}")
+            else:
+                raise
+
     def _verify_code(self, lean_code: str) -> VerificationResult:
         """
         Verify Lean code using kimina-lean-server.

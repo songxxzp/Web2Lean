@@ -1,8 +1,9 @@
 """
 Database viewing API endpoints.
 """
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, send_file
 from sqlalchemy import func
+import os
 
 database_bp = Blueprint('database', __name__)
 
@@ -38,8 +39,12 @@ def clear_data():
                 ProcessingStatus.verification_time: None,
                 ProcessingStatus.verification_completed_at: None
             }, synchronize_session=False)
+
+            # Also clear lean_conversion_results
+            from backend.database.schema import LeanConversionResult
+            lc_count = session.query(LeanConversionResult).delete()
             session.commit()
-            return jsonify({'message': f'Cleared lean code from {count} questions'})
+            return jsonify({'message': f'Cleared lean code from {count} questions and {lc_count} conversion results'})
 
         elif stage == 'verification':
             # Clear all verification status but keep lean code
@@ -54,8 +59,28 @@ def clear_data():
                 ProcessingStatus.verification_time: None,
                 ProcessingStatus.verification_completed_at: None
             }, synchronize_session=False)
+
+            # Also clear verification status in lean_conversion_results
+            from backend.database.schema import LeanConversionResult
+            lc_count = session.query(LeanConversionResult).filter(
+                LeanConversionResult.verification_status.isnot(None)
+            ).update({
+                LeanConversionResult.verification_status: None,
+                LeanConversionResult.verification_has_errors: None,
+                LeanConversionResult.verification_has_warnings: None,
+                LeanConversionResult.verification_messages: None,
+                LeanConversionResult.verification_time: None,
+                # Question verification
+                LeanConversionResult.question_verification_status: None,
+                LeanConversionResult.question_verification_messages: None,
+                LeanConversionResult.question_verification_time: None,
+                # Answer verification
+                LeanConversionResult.answer_verification_status: None,
+                LeanConversionResult.answer_verification_messages: None,
+                LeanConversionResult.answer_verification_time: None
+            }, synchronize_session=False)
             session.commit()
-            return jsonify({'message': f'Cleared verification status from {count} questions'})
+            return jsonify({'message': f'Cleared verification status from {count} questions and {lc_count} conversion results'})
 
         elif stage == 'preprocess':
             # Clear preprocessed data by version(s)
@@ -206,8 +231,14 @@ def clear_question_stage(question_id: int):
                 ps.verification_completed_at = None
                 if ps.status == 'lean_converted':
                     ps.status = 'preprocessed'
+
+            # Also clear lean_conversion_results for this question
+            from backend.database.schema import LeanConversionResult
+            lc_count = session.query(LeanConversionResult).filter(
+                LeanConversionResult.question_id == question_id
+            ).delete()
             session.commit()
-            return jsonify({'message': 'Cleared lean code'})
+            return jsonify({'message': f'Cleared lean code and {lc_count} conversion results'})
 
         elif stage == 'preprocess':
             # Clear preprocessed data, lean code, verification status, and failed/cant_convert status
@@ -231,8 +262,14 @@ def clear_question_stage(question_id: int):
                 if ps.status in ['preprocessed', 'lean_converted', 'failed', 'cant_convert']:
                     ps.status = 'raw'
                 ps.current_stage = None
+
+            # Also clear lean_conversion_results for this question
+            from backend.database.schema import LeanConversionResult
+            lc_count = session.query(LeanConversionResult).filter(
+                LeanConversionResult.question_id == question_id
+            ).delete()
             session.commit()
-            return jsonify({'message': 'Cleared preprocessed data'})
+            return jsonify({'message': f'Cleared preprocessed data and {lc_count} conversion results'})
 
         elif stage == 'raw':
             # Delete entire question and related data
@@ -299,7 +336,7 @@ def get_question_detail(question_id: int):
         return jsonify({'error': 'Question not found'}), 404
 
     # Debug: print theorem_name
-    print(f"[DEBUG] Question {question_id} theorem_name: {question.get('processing_status', {}).get('theorem_name')}")
+    print(f"[DEBUG] Question {question_id} theorem_name: {(question.get('processing_status') or {}).get('theorem_name')}")
 
     return jsonify(question)
 
@@ -560,6 +597,33 @@ def get_preprocessing_versions():
         versions.sort(key=lambda x: x['version'], reverse=True)
 
         return jsonify({'versions': versions})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@database_bp.route('/images/<int:image_id>', methods=['GET'])
+def get_image_file(image_id: int):
+    """Serve image file by ID."""
+    db = current_app.config['db']
+    session = db.get_session()
+
+    try:
+        from backend.database.schema import Image
+
+        image = session.query(Image).filter(Image.id == image_id).first()
+
+        if not image:
+            return jsonify({'error': 'Image not found'}), 404
+
+        # Try to serve from local path if available
+        if image.local_path and os.path.exists(image.local_path):
+            return send_file(image.local_path)
+
+        # If no local file, return error
+        return jsonify({'error': 'Image file not found'}), 404
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500

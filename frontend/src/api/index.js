@@ -172,8 +172,8 @@ export const databaseApi = {
  * Configuration API
  */
 export const configApi = {
-  getSites: () =>
-    apiRequest('/config/sites'),
+  getSites: async () =>
+    (await apiRequest('/config/sites')).sites || [],
 
   addSite: (siteData) =>
     apiRequest('/config/sites', {
@@ -244,11 +244,38 @@ export const verificationApi = {
     apiRequest(`/verification/status/${questionId}`)
 }
 
+/**
+ * Scheduler API
+ */
+export const schedulerApi = {
+  getTasks: () =>
+    apiRequest('/scheduler/tasks'),
+
+  createTask: (taskData) =>
+    apiRequest('/scheduler/tasks', {
+      method: 'POST',
+      body: taskData
+    }),
+
+  updateTask: (taskName, data) =>
+    apiRequest(`/scheduler/tasks/${taskName}`, {
+      method: 'PUT',
+      body: data
+    }),
+
+  deleteTask: (taskName) =>
+    apiRequest(`/scheduler/tasks/${taskName}`, { method: 'DELETE' }),
+
+  getStatus: () =>
+    apiRequest('/scheduler/status')
+}
+
 export default {
   crawlers: crawlersApi,
   statistics: statisticsApi,
   processing: processingApi,
   database: databaseApi,
   config: configApi,
-  verification: verificationApi
+  verification: verificationApi,
+  scheduler: schedulerApi
 }

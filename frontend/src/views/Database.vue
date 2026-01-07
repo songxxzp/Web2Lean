@@ -204,7 +204,34 @@
           <!-- Raw Question and Answers -->
           <el-tab-pane label="Raw Content" name="raw">
             <h4>Question</h4>
-            <div class="content">{{ selectedQuestion.body }}</div>
+            <div class="content" v-html="renderedBody"></div>
+
+            <!-- Images -->
+            <div v-if="questionImages && questionImages.length > 0" style="margin-top: 1.5rem;">
+              <h4>Images ({{ questionImages.length }})</h4>
+              <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem;">
+                <div v-for="(image, index) in questionImages" :key="image.id"
+                     style="border: 1px solid #e4e7ed; border-radius: 4px; padding: 0.5rem;">
+                  <el-image
+                    :src="`/api/database/images/${image.id}`"
+                    :preview-src-list="questionImages.map(img => `/api/database/images/${img.id}`)"
+                    :initial-index="index"
+                    fit="contain"
+                    style="width: 100%; height: 200px; display: block;"
+                  >
+                    <template #error>
+                      <div style="display: flex; justify-content: center; align-items: center; height: 100%; background: #f5f7fa; color: #909399;">
+                        <span>Failed to load</span>
+                      </div>
+                    </template>
+                  </el-image>
+                  <div style="margin-top: 0.5rem; font-size: 12px; color: #606266;">
+                    <div v-if="image.caption" style="margin-bottom: 0.25rem;"><strong>{{ image.caption }}</strong></div>
+                    <div style="color: #909399;">{{ image.original_url }}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
 
             <el-divider style="margin: 1.5rem 0;" />
 
@@ -216,7 +243,7 @@
                   <el-tag v-else type="info" size="small">Answer {{ index + 1 }}</el-tag>
                   <el-tag size="small">Score: {{ answer.score }}</el-tag>
                 </div>
-                <div class="content">{{ answer.body }}</div>
+                <div class="content" v-html="renderMathContent(answer.body)"></div>
               </div>
             </div>
             <div v-else class="content" style="color: #999; font-style: italic;">
@@ -246,11 +273,11 @@
             <!-- Show preprocessed content if available -->
             <div v-else-if="selectedQuestion.processing_status?.preprocessed_body">
               <h4>Preprocessed Question</h4>
-              <div class="content">{{ selectedQuestion.processing_status.preprocessed_body }}</div>
+              <div class="content" v-html="renderedPreprocessedBody"></div>
 
               <div v-if="selectedQuestion.processing_status.preprocessed_answer">
                 <h4 style="margin-top: 1rem;">Preprocessed Answer</h4>
-                <div class="content">{{ selectedQuestion.processing_status.preprocessed_answer }}</div>
+                <div class="content" v-html="renderedPreprocessedAnswer"></div>
               </div>
 
               <div v-if="selectedQuestion.processing_status.correction_notes" style="margin-top: 1rem;">
@@ -286,6 +313,7 @@
                   >
                     <span>{{ conv.converter_name }}</span>
                     <el-tag size="small" style="margin-left: 8px;">{{ conv.converter_type }}</el-tag>
+                    <el-tag v-if="conv.converter_version" size="small" type="success" style="margin-left: 4px;">v{{ conv.converter_version }}</el-tag>
                   </el-option>
                 </el-select>
                 <el-tag v-if="getCurrentConversion()" :type="getVerificationStatusType(getCurrentConversion().verification_status)">
@@ -294,26 +322,11 @@
               </div>
             </div>
 
-            <!-- Show verification status -->
-            <div v-if="getCurrentConversion() && getCurrentConversion().verification_status && getCurrentConversion().verification_status !== 'not_verified'" style="margin-bottom: 1rem;">
-              <el-alert
-                :type="getVerificationStatusType(getCurrentConversion().verification_status)"
-                :closable="false"
-              >
-                <template #title>
-                  <strong>Verification Status: {{ getCurrentConversion().verification_status }}</strong>
-                </template>
-                <div v-if="getCurrentConversion().verification_time" style="margin-top: 0.5rem;">
-                  Time: {{ getCurrentConversion().verification_time.toFixed(3) }}s
-                </div>
-                <!-- Show verification messages if any -->
-                <div v-if="getCurrentConversion().verification_messages && getCurrentConversion().verification_messages.length > 0" style="margin-top: 0.5rem;">
-                  <div v-for="(msg, idx) in getCurrentConversion().verification_messages" :key="idx" style="margin-top: 0.25rem;">
-                    <el-tag :type="msg.severity === 'error' ? 'danger' : msg.severity === 'warning' ? 'warning' : 'info'" size="small">
-                      Line {{ msg.line }}: {{ msg.message }}
-                    </el-tag>
-                  </div>
-                </div>
+            <!-- Show Lean conversion error first -->
+            <div v-if="getCurrentConversion() && getCurrentConversion().error_message" style="margin-bottom: 1rem;">
+              <el-alert type="error" :closable="false">
+                <strong>Lean Conversion Failed:</strong>
+                <div style="margin-top: 0.5rem; white-space: pre-wrap;">{{ getCurrentConversion().error_message }}</div>
               </el-alert>
             </div>
 
@@ -325,18 +338,60 @@
               </el-alert>
             </div>
 
+            <!-- Show processing_status lean_error if no conversion results but there's an error -->
+            <div v-else-if="!getCurrentConversion() && selectedQuestion.processing_status?.lean_error" style="margin-bottom: 1rem;">
+              <el-alert type="error" :closable="false">
+                <strong>Lean Conversion Error:</strong>
+                <div style="margin-top: 0.5rem; white-space: pre-wrap;">{{ selectedQuestion.processing_status.lean_error }}</div>
+              </el-alert>
+            </div>
+
             <!-- Show Lean code split into question and answer -->
             <div v-if="getCurrentConversion() && (getCurrentConversion().question_lean_code || getCurrentConversion().answer_lean_code)">
               <!-- Question Lean Code (Theorem Declaration Only) -->
               <div v-if="getCurrentConversion().question_lean_code">
-                <h4>Question (Theorem Declaration)</h4>
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 0.5rem;">
+                  <h4 style="margin: 0;">Question (Theorem Declaration)</h4>
+                  <el-tag v-if="getCurrentConversion().question_verification_status"
+                    :type="getVerificationStatusType(getCurrentConversion().question_verification_status)"
+                    size="small">
+                    {{ getCurrentConversion().question_verification_status }}
+                  </el-tag>
+                </div>
+                <!-- Question verification messages -->
+                <div v-if="getCurrentConversion().question_verification_messages && getCurrentConversion().question_verification_messages.length > 0" style="margin-bottom: 0.5rem;">
+                  <el-alert :type="getVerificationStatusType(getCurrentConversion().question_verification_status)" :closable="false">
+                    <div v-for="(msg, idx) in getCurrentConversion().question_verification_messages" :key="idx" style="margin-top: 0.25rem;">
+                      <el-tag :type="msg.severity === 'error' ? 'danger' : msg.severity === 'warning' ? 'warning' : 'info'" size="small">
+                        Line {{ msg.line }}: {{ msg.message }}
+                      </el-tag>
+                    </div>
+                  </el-alert>
+                </div>
                 <pre class="code">{{ getCurrentConversion().question_lean_code }}</pre>
               </div>
 
               <!-- Answer Lean Code (Complete Theorem with Proof) -->
               <div v-if="getCurrentConversion().answer_lean_code">
                 <el-divider style="margin: 1.5rem 0;" />
-                <h4>Lean Theorem Statement (Complete with Proof)</h4>
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 0.5rem;">
+                  <h4 style="margin: 0;">Lean Theorem Statement (Complete with Proof)</h4>
+                  <el-tag v-if="getCurrentConversion().answer_verification_status"
+                    :type="getVerificationStatusType(getCurrentConversion().answer_verification_status)"
+                    size="small">
+                    {{ getCurrentConversion().answer_verification_status }}
+                  </el-tag>
+                </div>
+                <!-- Answer verification messages -->
+                <div v-if="getCurrentConversion().answer_verification_messages && getCurrentConversion().answer_verification_messages.length > 0" style="margin-bottom: 0.5rem;">
+                  <el-alert :type="getVerificationStatusType(getCurrentConversion().answer_verification_status)" :closable="false">
+                    <div v-for="(msg, idx) in getCurrentConversion().answer_verification_messages" :key="idx" style="margin-top: 0.25rem;">
+                      <el-tag :type="msg.severity === 'error' ? 'danger' : msg.severity === 'warning' ? 'warning' : 'info'" size="small">
+                        Line {{ msg.line }}: {{ msg.message }}
+                      </el-tag>
+                    </div>
+                  </el-alert>
+                </div>
                 <pre class="code">{{ getCurrentConversion().answer_lean_code }}</pre>
               </div>
             </div>
@@ -405,6 +460,7 @@
               <div style="display: flex; align-items: center; gap: 8px;">
                 <strong>{{ converter.converter_name }}</strong>
                 <el-tag size="small" type="info">{{ converter.converter_type }}</el-tag>
+                <el-tag v-if="converter.converter_version" size="small" type="success">v{{ converter.converter_version }}</el-tag>
                 <span style="color: #666; font-size: 0.9em;">({{ converter.count }} results)</span>
               </div>
             </el-checkbox>
@@ -489,6 +545,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { databaseApi, configApi, verificationApi } from '@/api'
+import { renderContent } from '@/utils/mathRenderer'
 
 const filters = ref({
   site_id: null,
@@ -509,11 +566,28 @@ const maxPages = computed(() => {
   return totalPages > 0 ? totalPages : 1
 })
 
+// Rendered content with math support
+const renderedBody = computed(() => {
+  if (!selectedQuestion.value?.body) return ''
+  return renderContent(selectedQuestion.value.body)
+})
+
+const renderedPreprocessedBody = computed(() => {
+  if (!selectedQuestion.value?.processing_status?.preprocessed_body) return ''
+  return renderContent(selectedQuestion.value.processing_status.preprocessed_body)
+})
+
+const renderedPreprocessedAnswer = computed(() => {
+  if (!selectedQuestion.value?.processing_status?.preprocessed_answer) return ''
+  return renderContent(selectedQuestion.value.processing_status.preprocessed_answer)
+})
+
 const questions = ref([])
 const sites = ref([])
 const detailVisible = ref(false)
 const selectedQuestion = ref(null)
 const activeTab = ref('raw')
+const questionImages = ref([])
 const clearing = ref(false)
 const verifying = ref(false)
 const exporting = ref(false)
@@ -590,9 +664,19 @@ async function showDetail(row) {
     detailVisible.value = true
     activeTab.value = 'raw'
 
+    // Load images
+    try {
+      const response = await fetch(`/api/database/questions/${row.id}/images`)
+      const data = await response.json()
+      questionImages.value = data || []
+    } catch (error) {
+      console.error('Failed to load images:', error)
+      questionImages.value = []
+    }
+
     // Load lean conversion results
     try {
-      const response = await fetch(`http://localhost:5000/api/database/questions/${row.id}/lean-conversions`)
+      const response = await fetch(`/api/database/questions/${row.id}/lean-conversions`)
       const data = await response.json()
       leanConversions.value = data.results || []
 
@@ -633,6 +717,12 @@ function formalizationTagType(value) {
   return types[value] || 'info'
 }
 
+// Render math content for answers
+function renderMathContent(text) {
+  if (!text) return ''
+  return renderContent(text)
+}
+
 function getFormalizationValueType(value) {
   const types = {
     low: 'info',
@@ -670,7 +760,7 @@ function getVerificationStatusLabel(status) {
 // Load available converters for clearing dialog
 async function loadAvailableConverters() {
   try {
-    const response = await fetch('http://localhost:5000/api/database/lean-conversions/converters')
+    const response = await fetch('/api/database/lean-conversions/converters')
     const data = await response.json()
     availableConverters.value = data.converters || []
   } catch (error) {
@@ -714,7 +804,7 @@ async function clearSelectedConverters() {
 
   try {
     clearingConverters.value = true
-    const response = await fetch('http://localhost:5000/api/database/lean-conversions/clear', {
+    const response = await fetch('/api/database/lean-conversions/clear', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ converters: selectedConvertersToClear.value })
@@ -739,7 +829,7 @@ async function clearSelectedConverters() {
 // Show preprocessing version selection dialog
 async function showVersionClearDialog() {
   try {
-    const response = await fetch('http://localhost:5000/api/database/preprocessing-versions')
+    const response = await fetch('/api/database/preprocessing-versions')
     const data = await response.json()
 
     if (response.ok) {
@@ -778,7 +868,7 @@ async function clearSelectedVersions() {
 
   try {
     clearingVersions.value = true
-    const response = await fetch('http://localhost:5000/api/database/clear', {
+    const response = await fetch('/api/database/clear', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ stage: 'preprocess', versions: selectedVersionsToClear.value })

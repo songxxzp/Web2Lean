@@ -132,7 +132,7 @@ class ProcessingStatus(Base):
     correction_notes = Column(Text)
     theorem_name = Column(Text)  # Generated theorem name for Lean conversion
     preprocessing_version = Column(Text)  # Backend version used for preprocessing
-    formalization_value = Column(Text, default='medium')  # 'low', 'medium', 'high' - value for formalization
+    formalization_value = Column(Text, default=None)  # 'low', 'medium', 'high' - value for formalization (set during preprocessing)
     preprocessing_error = Column(Text)  # Error message if preprocessing failed
     question_lean_code = Column(Text)  # Lean code for question (theorem/definition)
     answer_lean_code = Column(Text)  # Lean code for answer (proof)
@@ -192,14 +192,17 @@ class ScheduledTask(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     task_name = Column(String(100), unique=True, nullable=False, index=True)
-    task_type = Column(Text, nullable=False)  # 'crawl', 'convert_lean', 'preprocess'
+    task_type = Column(Text, nullable=False)  # 'crawl', 'preprocess', 'convert_lean', 'verify'
     site_id = Column(Integer, ForeignKey('sites.site_id'))
-    interval_hours = Column(Integer)
-    interval_minutes = Column(Integer)
+    interval_days = Column(Integer, default=0)
+    interval_hours = Column(Integer, default=24)
+    interval_minutes = Column(Integer, default=0)
     last_run = Column(Text)
     next_run = Column(Text)
-    enabled = Column(Boolean, default=True)
-    config_json = Column(Text)  # Additional task configuration
+    enabled = Column(Boolean, default=False)  # Default disabled
+    config_json = Column(Text)  # Additional task configuration (converter_name, limit, etc.)
+    created_at = Column(Text, default=lambda: datetime.now().isoformat())
+    updated_at = Column(Text, default=lambda: datetime.now().isoformat(), onupdate=lambda: datetime.now().isoformat())
 
     __table_args__ = (
         Index('idx_scheduled_tasks_type', 'task_type'),
@@ -214,13 +217,27 @@ class LeanConversionResult(Base):
     question_id = Column(Integer, ForeignKey('questions.id'), nullable=False)
     converter_name = Column(String(100), nullable=False, index=True)  # e.g., 'kimina-7b', 'glm-4'
     converter_type = Column(String(50), nullable=False)  # 'local_model', 'api_llm', 'manual'
+    converter_version = Column(String(50))  # Version of the converter (e.g., GLM_AGENT_VERSION, KIMINA_VERSION)
     question_lean_code = Column(Text)  # Lean code for question (theorem/definition)
     answer_lean_code = Column(Text)  # Lean code for answer (proof)
+
+    # Overall verification status (based on both question and answer)
     verification_status = Column(Text)  # 'not_verified', 'verifying', 'passed', 'warning', 'failed', 'error'
     verification_has_errors = Column(Boolean, default=False)
     verification_has_warnings = Column(Boolean, default=False)
     verification_messages = Column(Text)  # JSON array of verification messages
-    verification_time = Column(Float)  # Verification time in seconds
+    verification_time = Column(Float)  # Total verification time in seconds
+
+    # Question-specific verification
+    question_verification_status = Column(Text)  # 'not_verified', 'verifying', 'passed', 'warning', 'failed', 'error'
+    question_verification_messages = Column(Text)  # JSON array of question verification messages
+    question_verification_time = Column(Float)  # Question verification time in seconds
+
+    # Answer-specific verification
+    answer_verification_status = Column(Text)  # 'not_verified', 'verifying', 'passed', 'warning', 'failed', 'error'
+    answer_verification_messages = Column(Text)  # JSON array of answer verification messages
+    answer_verification_time = Column(Float)  # Answer verification time in seconds
+
     conversion_time = Column(Float)  # Conversion time in seconds
     error_message = Column(Text)  # Error if conversion failed
     created_at = Column(Text, default=lambda: datetime.now().isoformat())
