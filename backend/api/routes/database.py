@@ -1,8 +1,9 @@
 """
 Database viewing API endpoints.
 """
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, send_file
 from sqlalchemy import func
+import os
 
 database_bp = Blueprint('database', __name__)
 
@@ -596,6 +597,33 @@ def get_preprocessing_versions():
         versions.sort(key=lambda x: x['version'], reverse=True)
 
         return jsonify({'versions': versions})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@database_bp.route('/images/<int:image_id>', methods=['GET'])
+def get_image_file(image_id: int):
+    """Serve image file by ID."""
+    db = current_app.config['db']
+    session = db.get_session()
+
+    try:
+        from backend.database.schema import Image
+
+        image = session.query(Image).filter(Image.id == image_id).first()
+
+        if not image:
+            return jsonify({'error': 'Image not found'}), 404
+
+        # Try to serve from local path if available
+        if image.local_path and os.path.exists(image.local_path):
+            return send_file(image.local_path)
+
+        # If no local file, return error
+        return jsonify({'error': 'Image file not found'}), 404
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500

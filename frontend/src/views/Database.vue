@@ -206,6 +206,33 @@
             <h4>Question</h4>
             <div class="content" v-html="renderedBody"></div>
 
+            <!-- Images -->
+            <div v-if="questionImages && questionImages.length > 0" style="margin-top: 1.5rem;">
+              <h4>Images ({{ questionImages.length }})</h4>
+              <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem;">
+                <div v-for="(image, index) in questionImages" :key="image.id"
+                     style="border: 1px solid #e4e7ed; border-radius: 4px; padding: 0.5rem;">
+                  <el-image
+                    :src="`/api/database/images/${image.id}`"
+                    :preview-src-list="questionImages.map(img => `/api/database/images/${img.id}`)"
+                    :initial-index="index"
+                    fit="contain"
+                    style="width: 100%; height: 200px; display: block;"
+                  >
+                    <template #error>
+                      <div style="display: flex; justify-content: center; align-items: center; height: 100%; background: #f5f7fa; color: #909399;">
+                        <span>Failed to load</span>
+                      </div>
+                    </template>
+                  </el-image>
+                  <div style="margin-top: 0.5rem; font-size: 12px; color: #606266;">
+                    <div v-if="image.caption" style="margin-bottom: 0.25rem;"><strong>{{ image.caption }}</strong></div>
+                    <div style="color: #909399;">{{ image.original_url }}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <el-divider style="margin: 1.5rem 0;" />
 
             <h4>Answers</h4>
@@ -560,6 +587,7 @@ const sites = ref([])
 const detailVisible = ref(false)
 const selectedQuestion = ref(null)
 const activeTab = ref('raw')
+const questionImages = ref([])
 const clearing = ref(false)
 const verifying = ref(false)
 const exporting = ref(false)
@@ -635,6 +663,16 @@ async function showDetail(row) {
     selectedQuestion.value = q
     detailVisible.value = true
     activeTab.value = 'raw'
+
+    // Load images
+    try {
+      const response = await fetch(`/api/database/questions/${row.id}/images`)
+      const data = await response.json()
+      questionImages.value = data || []
+    } catch (error) {
+      console.error('Failed to load images:', error)
+      questionImages.value = []
+    }
 
     // Load lean conversion results
     try {
